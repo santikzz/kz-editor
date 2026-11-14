@@ -1,0 +1,11 @@
+# Written by Herdr on every start
+gpui-kit.d.ts
+jsconfig.json
+
+# Edits saved beside a file when its tab closed during a conflict
+*.unsaved
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
