@@ -1,12 +1,14 @@
-// A file in its own tab: an editor for code, Preview or Source for Markdown, Format for JSON.
+// A file in its own tab: an editor for code, Preview or Source for Markdown and SVG, Format
+// for JSON, and a picture for images and PDFs (binary.js).
 // Edits are saved with ctrl+s. A file changed on disk follows along while nothing is unsaved;
 // with unsaved edits it asks first, so nobody's work is overwritten.
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { nextCommand, readTextFile, run, settings, theme, writeTextFile } from "herdr";
+import { exec, nextCommand, readTextFile, run, settings, theme, window, writeTextFile } from "herdr";
 import { activeSpace, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { extOf, languageOf } from "./lang.js";
+import { Binary, cacheSvg, imageView, viewerOf } from "./binary.js";
 import { buildMarkdown, imageSources, loadImage, parentOf, renderMarkdown, resolve } from "./markdown.js";
 
 const EDITABLE = 400000;
@@ -76,6 +78,10 @@ export class FileTab {
     return ["md", "markdown"].includes(extOf(this.file?.path ?? ""));
   }
 
+  get isSvg() {
+    return extOf(this.file?.path ?? "") === "svg";
+  }
+
   get isJson() {
     return extOf(this.file?.path ?? "") === "json";
   }
@@ -87,6 +93,11 @@ export class FileTab {
 
   load(cx) {
     const file = this.file;
+    this.binary?.close();
+    this.binary = null;
+    this.unreadable = false;
+    this.svg = null;
+    this.svgText = null;
     this.code?.release();
     this.code = null;
     this.markdown = null;
@@ -96,6 +107,12 @@ export class FileTab {
     this.notice = null;
     this.conflict = false;
     this.mode = "preview";
+    const kind = viewerOf(file.path);
+    if (kind) {
+      this.binary = new Binary(file, kind);
+      this.binary.start(cx);
+      return this.updateTitle();
+    }
     cx.spawn(async (cx) => {
       let text;
       try {
@@ -104,9 +121,9 @@ export class FileTab {
         text = undefined;
       }
       if (this.file !== file) return;
-      if (text === undefined) this.problem = "This file is too large (over 1 MB) or cannot be read.";
-      else if (text === null) this.problem = "This file is no longer there.";
-      else if (text.includes("\0")) this.problem = "Binary file. kz-editor cannot show it yet.";
+      this.unreadable = text === undefined || Boolean(text?.includes("\0"));
+      if (text === null) this.problem = "This file is no longer there.";
+      else if (this.unreadable) this.problem = "kz-editor cannot show this file. It shows text files up to 1 MB, images and PDFs.";
       else this.show(text);
       this.updateTitle();
       cx.notify();
@@ -236,9 +253,18 @@ export class FileTab {
     if (path && path !== this.file.path) openFile({ path, root: this.file.root, on: this.file.on ?? null });
   }
 
+  // The system's own opener starts the default app for the file type.
+  openOutside() {
+    const platform = window()?.platform;
+    const path = this.file.path;
+    if (platform === "windows") exec("explorer", [path.replace(/\//g, "\\")]).catch(() => {});
+    else exec(platform === "macos" ? "open" : "xdg-open", [path]).catch(() => {});
+  }
+
   // A closing tab cannot ask, so unsaved edits are written: over the file when it has not
   // changed on disk, else beside it as <name>.unsaved so nothing is lost.
   async close() {
+    if (this.binary) return this.binary.close();
     if (!this.dirty) return;
     const text = this.output();
     try {
@@ -289,6 +315,8 @@ export class FileTab {
     const folder = this.file.path.slice(this.file.root.length + 1, -name.length - 1);
     const icon = iconFor(this.icons, name, { light: isLight(t.background) });
     const readOnly = this.code && !this.editable ? (this.file.on ? "Read only: other machine" : "Read only: too large") : null;
+    const info = this.binary?.info();
+    const openable = !this.file.on && (Boolean(this.binary) || this.unreadable);
     return h_flex()
       .h(34)
       .flex_none()
@@ -302,13 +330,14 @@ export class FileTab {
       .child(div().flex_none().font_medium().child(name))
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(folder))
       .when(Boolean(readOnly), (el) => el.child(div().flex_none().text_color(t.dim).child(readOnly)))
+      .when(Boolean(info), (el) => el.child(div().flex_none().text_color(t.dim).child(info)))
       .when(Boolean(entry?.preview), (el) =>
         el.child(this.button("kz-keep", "Keep tab", t, (cx) => {
           setEntry(this.tab, { preview: false });
           cx.notify();
         })),
       )
-      .when(this.isMarkdown && Boolean(this.code), (el) =>
+      .when((this.isMarkdown || this.isSvg) && Boolean(this.code), (el) =>
         el.child(
           h_flex()
             .gap(2)
@@ -316,6 +345,7 @@ export class FileTab {
             .child(this.toggle("kz-md-source", "Source", this.mode !== "preview", t, (cx) => ((this.mode = "source"), cx.notify()))),
         ),
       )
+      .when(openable, (el) => el.child(this.button("kz-open", "Open in default app", t, () => this.openOutside())))
       .when(this.isJson && this.editable, (el) => el.child(this.button("kz-format", "Format", t, (cx) => this.format(cx))))
       .when(this.dirty, (el) => el.child(this.button("kz-save", this.saving ? "Saving…" : "Save", t, (cx) => this.save(cx), true)));
   }
@@ -342,6 +372,26 @@ export class FileTab {
       copied: this.copied,
     };
     return renderMarkdown(this.markdown, this.images, actions, this.width);
+  }
+
+  // Drawn from the editor text, so unsaved edits show. The last picture stays until the next is ready.
+  svgPreview(t, cx) {
+    const text = this.code.value();
+    if (this.svgText !== text) {
+      this.svgText = text;
+      cx.spawn(async (cx) => {
+        const picture = await cacheSvg(text).catch(() => null);
+        if (this.svgText !== text) return;
+        this.svg = picture;
+        cx.notify();
+      });
+    }
+    if (!this.svg) return div().p(16).text_color(t.dim).child("Loading…");
+    return imageView(this.svg, this.box(), t);
+  }
+
+  box() {
+    return { width: this.width ?? 800, height: (this.height ?? 600) - 34 };
   }
 
   loadImages(cx) {
@@ -395,8 +445,9 @@ export class FileTab {
       .text_color(t.foreground)
       .text_size(13)
       .on_size_change((size, cx) => {
-        if (size.width === this.width) return;
+        if (size.width === this.width && size.height === this.height) return;
         this.width = size.width;
+        this.height = size.height;
         cx.notify();
       });
     if (!this.file) return root.child(message("No file."));
@@ -413,9 +464,11 @@ export class FileTab {
       )
       .when(Boolean(this.notice), (el) => el.child(this.bar(this.notice, t, [])));
 
+    if (this.binary) return root.child(this.binary.view(t, this.box()));
     if (this.problem) return root.child(message(this.problem));
     if (!this.code) return root.child(message("Loading…"));
     if (this.isMarkdown && this.mode === "preview") return root.child(this.preview(t, cx));
+    if (this.isSvg && this.mode === "preview") return root.child(this.svgPreview(t, cx));
     return root.child(this.editor());
   }
 }

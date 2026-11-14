@@ -14,8 +14,9 @@ const REFRESH_MS = 10000;
 const RANK = { M: 1, A: 2, D: 3, U: 4 };
 
 // Forward slashes and an upper-case drive, so paths match what git prints.
+// watchFolder gives Windows paths with the \\?\ prefix.
 export const normalize = (path) =>
-  path.replace(/\\/g, "/").replace(/\/+$/, "").replace(/^([a-z]):/, (_m, d) => `${d.toUpperCase()}:`);
+  path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "").replace(/^([a-z]):/, (_m, d) => `${d.toUpperCase()}:`);
 
 // Where the tree should be. A file tab keeps the tree on that file's folder.
 function location() {

@@ -10,6 +10,8 @@ Open files from the [Herdr](https://herdr.dev) side panel in their own tabs, nex
 - **A tab for each file.** A click opens the file in a preview tab, and the next click reuses that tab. A double-click or an edit keeps the tab.
 - **An editor** with syntax colors, line numbers, folding, undo and multiple cursors.
 - **Markdown** opens as a preview in the GitHub style: its fonts, sizes and colors, images and badges, alerts, task lists, tables, and code blocks with colors and a Copy button. Switch to Source to edit it. Relative links open the linked file.
+- **Images and PDFs** open as pictures: PNG, JPEG, GIF, WebP, BMP, ICO and TIFF at their own size, made smaller to fit the tab, and PDF pages one under the other. SVG files have Preview and Source. When the file changes on disk, the tab shows the new version.
+- **Other binary files** have an **Open in default app** button.
 - **JSON** has a Format button that keeps the indent of the file.
 - **Line endings stay the same.** A file with CRLF line endings is saved with CRLF.
 
@@ -88,6 +90,8 @@ All other files open without colors.
 - The tree shows at most 500 entries in a folder and 5,000 in total.
 - When the disk version loads, the cursor moves to the first line.
 - The Markdown preview shows Mermaid diagrams and math as code. Remote images need `curl`, which Windows 10, macOS and Linux include.
+- A PDF shows its first 50 pages. On Windows, Windows renders the pages. On macOS and Linux, install `pdftoppm` and `pdfinfo` (poppler).
+- Images and PDFs on other machines do not open. Audio and video files open only in their default app.
 
 ## How it works
 

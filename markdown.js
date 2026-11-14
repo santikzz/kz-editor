@@ -38,9 +38,9 @@ const ALERTS = {
 };
 // GitHub's font stack; the first one this machine has.
 const BODY_FONTS = ["Segoe UI", "Noto Sans", "Helvetica", "Arial"];
-const CACHE = "mods/kz-editor/.cache";
+export const CACHE = "mods/kz-editor/.cache";
 const IMAGE_TYPES = [["svg", "svg"], ["png", "png"], ["jpeg", "jpg"], ["gif", "gif"], ["webp", "webp"]];
-const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]);
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"]);
 
 export const parentOf = (path) => path.slice(0, path.lastIndexOf("/")) || "/";
 
@@ -193,7 +193,7 @@ export function buildMarkdown(text, light) {
 
 export const imageSources = (md) => md.blocks.flatMap((b) => (b.kind === "images" ? b.images.map((i) => i.src) : []));
 
-function hash(text) {
+export function hash(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
   return (h >>> 0).toString(16);
@@ -201,7 +201,7 @@ function hash(text) {
 
 // image() gives an image no layout size of its own, so the size comes from the file: the SVG
 // root tag, or the header of a PNG, GIF, JPEG or WebP.
-async function imageSize(path) {
+export async function imageSize(path) {
   if (path.endsWith(".svg")) {
     const tag = /<svg\b[^>]*>/i.exec(await fs.readFile(`${appHome()}/${path}`, "utf8").catch(() => ""))?.[0] ?? "";
     const box = attr(tag, "viewBox")?.trim().split(/[\s,]+/).map(Number) ?? [];
@@ -215,6 +215,7 @@ async function imageSize(path) {
   const le16 = (i) => b[i] | (b[i + 1] << 8);
   const le24 = (i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
   const be32 = (i) => ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0;
+  const le32 = (i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
   if (b[0] === 0x89 && b[1] === 0x50) return { width: be32(16), height: be32(20) };
   if (b[0] === 0x47 && b[1] === 0x49) return { width: le16(6), height: le16(8) };
   if (b[0] === 0xff && b[1] === 0xd8)
@@ -222,6 +223,26 @@ async function imageSize(path) {
       const marker = b[i + 1];
       if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: be16(i + 7), height: be16(i + 5) };
     }
+  if (b[0] === 0x42 && b[1] === 0x4d) return { width: Math.abs(le32(18)), height: Math.abs(le32(22)) };
+  // A TIFF keeps its size in the first directory: tag 256 is the width, 257 the height.
+  if ((b[0] === 0x49 && b[1] === 0x49) || (b[0] === 0x4d && b[1] === 0x4d)) {
+    const le = b[0] === 0x49;
+    const u16 = (i) => (le ? le16(i) : be16(i));
+    const u32 = (i) => (le ? le32(i) >>> 0 : be32(i));
+    const dir = u32(4);
+    const size = {};
+    for (let k = 0, e = dir + 2; k < u16(dir) && e + 12 <= b.length; k++, e += 12) {
+      const value = u16(e + 2) === 3 ? u16(e + 8) : u32(e + 8);
+      if (u16(e) === 256) size.width = value;
+      if (u16(e) === 257) size.height = value;
+    }
+    return size.width && size.height ? size : null;
+  }
+  // An ICO holds several sizes; the largest is drawn.
+  if (b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 0) {
+    const sizes = Array.from({ length: le16(4) }, (_v, k) => b[6 + 16 * k] || 256);
+    return sizes.length ? { width: Math.max(...sizes), height: Math.max(...sizes) } : null;
+  }
   if (String.fromCharCode(b[8], b[9], b[10], b[11]) === "WEBP") {
     const chunk = String.fromCharCode(b[12], b[13], b[14], b[15]);
     if (chunk === "VP8X") return { width: 1 + le24(24), height: 1 + le24(27) };
@@ -265,10 +286,15 @@ async function cacheImage(src, folder, on) {
   return copied.code === 0 ? path : null;
 }
 
+// A PowerShell string literal. Values go inside the command: PowerShell joins the arguments
+// after -Command with spaces, so a path with a space would split in two. PowerShell also reads
+// the typographic single quotes as quotes, so those are doubled too.
+export const ps = (text) => `'${String(text).replace(/['‘’‚‛]/g, "$&$&")}'`;
+
 // Files are copied and moved by the OS: the mod's fs.writeFile loses binary data.
-const fileOp = (powershell, unix, from, to) =>
+export const fileOp = (powershell, unix, from, to) =>
   window()?.platform === "windows"
-    ? exec("powershell", ["-NoProfile", "-Command", `& { param($a, $b) ${powershell} -LiteralPath $a -Destination $b -Force }`, from, to])
+    ? exec("powershell", ["-NoProfile", "-Command", `${powershell} -LiteralPath ${ps(from)} -Destination ${ps(to)} -Force`])
     : exec(unix, ["-f", "--", from, to]);
 
 const textView = (id, md, color, actions) =>
