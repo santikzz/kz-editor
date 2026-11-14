@@ -9,3 +9,9 @@ jsconfig.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Images copied or downloaded for Markdown previews
+.cache/
+
+# Local design tool settings
+.impeccable/

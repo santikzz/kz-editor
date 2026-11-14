@@ -2,52 +2,16 @@
 // Edits are saved with ctrl+s. A file changed on disk follows along while nothing is unsaved;
 // with unsaved edits it asks first, so nobody's work is overwritten.
 import { div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
 import { nextCommand, readTextFile, run, settings, theme, writeTextFile } from "herdr";
 import { activeSpace, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
+import { extOf, languageOf } from "./lang.js";
+import { buildMarkdown, imageSources, loadImage, parentOf, renderMarkdown, resolve } from "./markdown.js";
 
 const EDITABLE = 400000;
 const DISK_MS = 2000;
 const CLAIM_MS = 500;
-
-// Grammars this Herdr build has. Others borrow the closest one: php reads well as javascript.
-const GRAMMARS = new Set(["javascript", "json", "python", "rust", "go", "yaml", "bash", "sql", "ruby", "java", "c", "cpp", "lua", "html", "css", "markdown"]);
-const ALIASES = {
-  js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript", ts: "javascript", tsx: "javascript",
-  mts: "javascript", cts: "javascript", php: "javascript", vue: "html", svelte: "html", astro: "html", htm: "html",
-  xml: "html", svg: "html", scss: "css", less: "css", jsonc: "json", json5: "json", md: "markdown", py: "python",
-  rs: "rust", yml: "yaml", toml: "yaml", sh: "bash", zsh: "bash", ps1: "bash", rb: "ruby", kt: "java", cs: "java",
-  scala: "java", h: "c", cc: "cpp", cxx: "cpp", hpp: "cpp",
-};
-
-const extOf = (name) => (name.includes(".") ? name.split(".").pop().toLowerCase() : "");
-const parentOf = (path) => path.slice(0, path.lastIndexOf("/")) || "/";
-
-function languageOf(name) {
-  const lower = name.toLowerCase();
-  if (lower.endsWith(".blade.php")) return "html";
-  if (lower === "dockerfile" || lower.startsWith(".env")) return "bash";
-  const language = ALIASES[extOf(lower)] ?? extOf(lower);
-  return GRAMMARS.has(language) ? language : "text";
-}
-
-// A Markdown link as an absolute path, from the file's folder. Null for an anchor alone.
-function resolve(folder, link) {
-  let target = link.replace(/^file:\/\//i, "").split("#")[0];
-  try {
-    target = decodeURIComponent(target);
-  } catch {}
-  if (!target) return null;
-  if (/^\/[a-z]:\//i.test(target)) target = target.slice(1);
-  const absolute = /^([a-z]:)?\//i.test(target) ? target : `${folder}/${target}`;
-  const parts = [];
-  for (const part of absolute.split("/")) {
-    if (part === "..") parts.pop();
-    else if (part && part !== ".") parts.push(part);
-  }
-  return `${absolute.startsWith("/") ? "/" : ""}${parts.join("/")}`;
-}
 
 const syntax = (t) => ({
   keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1,
@@ -58,6 +22,7 @@ export class FileTab {
   constructor(p) {
     this.file = p.file ?? null;
     this.key = p.key ?? null;
+    this.images = new Map();
     this.space = p.space ?? activeSpace()?.id;
   }
 
@@ -124,6 +89,9 @@ export class FileTab {
     const file = this.file;
     this.code?.release();
     this.code = null;
+    this.markdown = null;
+    this.markdownKey = null;
+    this.images = new Map();
     this.problem = null;
     this.notice = null;
     this.conflict = false;
@@ -352,22 +320,52 @@ export class FileTab {
       .when(this.dirty, (el) => el.child(this.button("kz-save", this.saving ? "Saving…" : "Save", t, (cx) => this.save(cx), true)));
   }
 
-  preview(t) {
-    return v_flex()
-      .id("kz-preview")
-      .flex_1()
-      .min_h(0)
-      .overflow_y_scrollbar()
-      .px(28)
-      .py(20)
-      .child(
-        TextView.markdown("kz-md", this.code.value())
-          .w_full()
-          .min_w(0)
-          .scrollable(false)
-          .selectable(true)
-          .on_link_click((url, cx) => this.followLink(url, cx)),
-      );
+  // Parsed again only when the text or the appearance changes.
+  preview(t, cx) {
+    const light = isLight(t.background);
+    const text = this.code.value();
+    const key = `${light}\0${text}`;
+    if (this.markdownKey !== key) {
+      this.markdownKey = key;
+      try {
+        this.markdown = buildMarkdown(text, light);
+        this.markdownError = null;
+        this.loadImages(cx);
+      } catch (e) {
+        this.markdownError = `This file cannot be previewed: ${e?.message ?? e}`;
+      }
+    }
+    if (this.markdownError) return div().p(16).text_color(t.dim).child(this.markdownError);
+    const actions = {
+      onLink: (url, cx) => this.followLink(url, cx),
+      onCopy: (index, code, cx) => this.copyCode(index, code, cx),
+      copied: this.copied,
+    };
+    return renderMarkdown(this.markdown, this.images, actions, this.width);
+  }
+
+  loadImages(cx) {
+    const file = this.file;
+    for (const src of imageSources(this.markdown)) {
+      if (this.images.has(src)) continue;
+      this.images.set(src, undefined);
+      cx.spawn(async (cx) => {
+        const loaded = await loadImage(src, parentOf(file.path), file.on).catch(() => null);
+        if (this.file !== file) return;
+        this.images.set(src, loaded);
+        cx.notify();
+      });
+    }
+  }
+
+  copyCode(index, code, cx) {
+    cx.write_to_clipboard(code);
+    this.copied = index;
+    cx.timer.after(1500, (cx) => {
+      if (this.copied === index) this.copied = null;
+      cx.notify();
+    });
+    cx.notify();
   }
 
   editor() {
@@ -388,7 +386,19 @@ export class FileTab {
     if (entry && entry.path !== this.file?.path) this.follow(entry, cx);
     const t = theme();
     const message = (text) => div().p(16).text_color(t.dim).child(text);
-    const root = v_flex().id("kz-file").size_full().min_h(0).min_w(0).bg(t.background).text_color(t.foreground).text_size(13);
+    const root = v_flex()
+      .id("kz-file")
+      .size_full()
+      .min_h(0)
+      .min_w(0)
+      .bg(t.background)
+      .text_color(t.foreground)
+      .text_size(13)
+      .on_size_change((size, cx) => {
+        if (size.width === this.width) return;
+        this.width = size.width;
+        cx.notify();
+      });
     if (!this.file) return root.child(message("No file."));
 
     root
@@ -405,7 +415,7 @@ export class FileTab {
 
     if (this.problem) return root.child(message(this.problem));
     if (!this.code) return root.child(message("Loading…"));
-    if (this.isMarkdown && this.mode === "preview") return root.child(this.preview(t));
+    if (this.isMarkdown && this.mode === "preview") return root.child(this.preview(t, cx));
     return root.child(this.editor());
   }
 }

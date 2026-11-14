@@ -9,7 +9,7 @@ Open files from the [Herdr](https://herdr.dev) side panel in their own tabs, nex
 - **A file tree** for the folder of the focused terminal. Files show git marks: `M` for modified, `U` for new, and dimmed names for ignored files.
 - **A tab for each file.** A click opens the file in a preview tab, and the next click reuses that tab. A double-click or an edit keeps the tab.
 - **An editor** with syntax colors, line numbers, folding, undo and multiple cursors.
-- **Markdown** opens as a rendered preview. Switch to Source to edit it. Relative links open the linked file.
+- **Markdown** opens as a preview in the GitHub style: its fonts, sizes and colors, images and badges, alerts, task lists, tables, and code blocks with colors and a Copy button. Switch to Source to edit it. Relative links open the linked file.
 - **JSON** has a Format button that keeps the indent of the file.
 - **Line endings stay the same.** A file with CRLF line endings is saved with CRLF.
 
@@ -87,7 +87,7 @@ All other files open without colors.
 - Files on other machines open read-only.
 - The tree shows at most 500 entries in a folder and 5,000 in total.
 - When the disk version loads, the cursor moves to the first line.
-- Images in Markdown previews do not show yet.
+- The Markdown preview shows Mermaid diagrams and math as code. Remote images need `curl`, which Windows 10, macOS and Linux include.
 
 ## How it works
 
@@ -95,4 +95,4 @@ All other files open without colors.
 
 ## License
 
-[MIT](LICENSE). The fallback icons in `icons/` come from [Lucide](https://lucide.dev) under the [ISC license](icons/LICENSE-lucide.txt).
+[MIT](LICENSE). The Markdown parser is [marked](https://marked.js.org), in `vendor/` under its [MIT license](vendor/marked.LICENSE.md). The icons in `icons/` come from [Lucide](https://lucide.dev) under the [ISC license](icons/LICENSE-lucide.txt).
