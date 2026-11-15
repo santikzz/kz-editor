@@ -1,6 +1,6 @@
 # kz-editor
 
-A file tree in the side panel and an editor tab for each file, in the style of VS Code. Click a file to open it in a reusable preview tab, double-click to keep the tab, edit, and save with `ctrl+s`. Markdown files show a preview in the GitHub style, with a switch to the source. Images and PDFs show as pictures that zoom, and a PDF finds text. A right-click on the tree opens a file menu. JSON files have a Format button.
+A file tree in the side panel and an editor tab for each file, in the style of VS Code. Click a file to open it in a reusable preview tab, double-click to keep the tab, edit, and save with `ctrl+s`. `ctrl+n` opens an untitled tab for a note or a new file. Markdown files show a preview in the GitHub style, with a switch to the source. Images and PDFs show as pictures that zoom, and a PDF finds text. A right-click on the tree opens a file menu. JSON files have a Format button.
 
 ![kz-editor](preview.png)
 
@@ -16,6 +16,8 @@ A file tree in the side panel and an editor tab for each file, in the style of V
 - **Find bar** (PDF, 34 px under the toolbar, on `surface`): a 240 px input, the place ("3 of 41", "No results", "reading page 12 of 50"), up and down chevrons and a close button. Each match has a blue fill (`#3b82f6` at 35 %); the current match has a darker fill (`#1d4ed8` at 50 %) and a 2 px `#1d4ed8` border. The fills are fixed colors: a PDF page is paper in any theme, and the words show through. While pages render, the toolbar says "Rendering 3 of 12 pages". Over 50 pages, it says "50 of 60 pages" and the list ends with "Showing the first 50 of 60 pages."
 - **Other binary files**: "kz-editor cannot show this file. It shows text files up to 1 MB, images and PDFs."
 - **Tab name**: the file name, with "● " in front while there are unsaved edits.
+- **Untitled tab**: the tab and the toolbar say "Untitled", with the default file icon and no folder. The editor has no syntax colors. The solid "Save" button shows while there is text.
+- **Save as** (a 420 × 196 dialog, as New file): the title "Save as", an empty input, "In <folder>" under it, Cancel and a solid "Save".
 - **Markdown preview**, in the GitHub style: a column of at most 960 px with 32 px padding, centered on the page background (`#0d1117` dark, `#ffffff` light), body text 16 px in Segoe UI (else Noto Sans, Helvetica, Arial). Headings at 32, 24, 20, 16, 14 and 13.6 px, weight 600, with a 1 px rule under h1 and h2. Blocks 16 px apart, 24 px above headings and rules. Rules are 4 px bars. Quotes have a 4 px left bar and muted text. Alerts (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`) have a 4 px bar and an icon and title in the Primer alert color. Code blocks sit on `#151b23` (`#f6f8fa` light) with 6 px corners, 13.6 px code on 20 px lines, Primer token colors, and a Copy button in the top right corner that shows "Copied" for 1.5 s. Images and badges keep their aspect ratio and never grow wider than the column.
 
 ## How it behaves
@@ -23,6 +25,8 @@ A file tree in the side panel and an editor tab for each file, in the style of V
 - The tree follows the focused terminal's folder. When a file tab has focus, the tree stays on that file's root. Each root remembers which folders were open.
 - Single click on a file: if a tab already shows it, select that tab. Otherwise reuse this space's preview tab, or open a new preview tab. Double-click: the tab is kept, so the next click opens a new tab. Editing a preview tab also keeps it.
 - Save with `ctrl+s` (`cmd-s` on macOS) or the Save button. A CRLF file is written back with CRLF.
+- Undo, redo and find are the Herdr editor's own: `ctrl+z`, `ctrl+y` (`cmd-shift-z` on macOS) and `ctrl+f`. The find bar has a case toggle, previous and next, Replace and Replace all. Herdr's `keys.json` binds `ctrl+shift+z` to `pane.zoom`, so it does not redo.
+- `ctrl+n` opens an untitled tab in the active space and selects it. `ctrl+s` or Save opens Save as in the folder of the space's first terminal (on another machine: the home folder). The name may name folders on the way (`notes/today.md`). Save as writes the file, opens it in a kept tab, reveals it in the tree and closes the untitled tab. A name in use shows "“name” already exists in this folder." in the dialog. Closing an untitled tab, or a restart, discards its text.
 - Every 2 s the open file is read from disk. With no unsaved edits, the editor follows the disk. With unsaved edits, a bar says "This file changed on disk." with "Load disk version" and "Keep mine".
 - Closing a tab with unsaved edits saves them. If the file changed on disk meanwhile, the edits go to `<file>.unsaved` beside it, so nothing is lost.
 - Markdown links: `http`, `https` and `mailto` open in the browser. Relative links open the file in kz-editor.
@@ -56,7 +60,8 @@ A file tree in the side panel and an editor tab for each file, in the style of V
 - `lang.js`: file names and code fence languages to the editor grammar names.
 - `icons/`: Lucide chevrons, minus, plus, search and x for the viewer.
 - `icons.js`: reads `mods/better-icons/icons.json` (the Better Icons mod). Without it, the tree uses the Lucide icons in `icons/`.
-- `keys.json`: `"global": { "ctrl-e": "mod.open:kz-editor" }` and `"mod:kz-editor": { "ctrl-s": "kz-editor.save" }`.
+- `keys.json`: `"global": { "ctrl-e": "mod.open:kz-editor", "ctrl-n": { "command": "tab.new", "args": { "name": "Untitled", "mod": "kz-editor", "props": { "role": "file", "untitled": true } } } }` and `"mod:kz-editor": { "ctrl-s": "kz-editor.save" }`.
+- Untitled tab: `file.js` with `props.untitled` and no `file` starts an empty editor and skips the registry. Save as takes `activeTab()` as its own tab (only the shown copies get `kz-editor.save`) and opens the `ask` dialog with `{ action: "save-as", target, text, tab }`. `menu.js` writes with `writeTextFile(path, text, null)`, then `openFile(..., true)` and `tab.close` on the untitled tab.
 - `icons/`: also Lucide arrow-up, arrow-down and corner-down-left for the search keycaps.
 - Layout: a block `{ "mod": "kz-editor" }` where the file tree goes, for example the `files` child of the side panel stack.
 
@@ -92,7 +97,12 @@ A file tree in the side panel and an editor tab for each file, in the style of V
 - `git ls-files` needs a repository. An empty bare repository as `--git-dir` with the folder as `--work-tree` lists any folder, with its `.gitignore` files.
 - A scroll area (`overflow_y_scrollbar`) in a popup that sizes to its content gets no height: give it one from its rows.
 - `div().child()` takes one element: an array of runs goes to `.children()`.
-- ctrl+e in the `global` section takes it from every terminal, where shells use it to go to the end of the line.
+- ctrl+e in the `global` section takes it from every terminal, where shells use it to go to the end of the line. ctrl+n takes the next history line from shells.
+- `window.dispatch_action("input::Backspace")` goes to Herdr's commands and shows the toast "unknown command", not to the editor's native actions. A mod cannot call the editor's undo, redo or find.
+- gpui-component's `set_value` skips the undo history (its source, not tested here). It also moves the cursor and the scroll to the top.
+- A space's `folder` is where it was made, not where it is now. `location()` uses the live folder of the space's first terminal before it.
+- `writeTextFile(path, text, null)` makes the missing folders and fails when the file exists. `readTextFile` throws on a folder or a binary file.
+- A tab's mod props cannot change. Save as opens the saved file in a new tab instead of turning the untitled tab into a file tab.
 
 ## Done when
 
@@ -119,3 +129,6 @@ A file tree in the side panel and an editor tab for each file, in the style of V
 - In a folder that is not a git repository (`~/.config/herdr-app/mods`), the search lists its files in under a second, and a nested repository's files too.
 - A bad `config.json` shows its error in the footer, and the search still works with the defaults.
 - `node match.test.mjs` prints `match.js: ok`.
+- `ctrl+n` opens an "Untitled" tab with an empty editor. Typing shows Save. `ctrl+s` opens Save as "In <folder of the space>".
+- Save as `notes/a.md` writes the file and the `notes` folder, opens `a.md` in a kept tab in Preview, and closes the untitled tab. The same name again shows "already exists".
+- Closing an untitled tab with text writes no file.

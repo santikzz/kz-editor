@@ -75,8 +75,11 @@ export async function rename(path, name, on) {
   return to;
 }
 
+// A name that checkName(name, on, true) allows may name folders on the way ("src/app.js").
+export const join = (folder, name) => `${folder}/${name.trim().replace(/\\/g, "/")}`;
+
 export async function create(folder, name, dir, on) {
-  const to = `${folder}/${name.trim().replace(/\\/g, "/")}`;
+  const to = join(folder, name);
   await shell(
     on,
     { to: native(to, on), dir, taken: `“${name.trim()}” already exists in this folder.` },

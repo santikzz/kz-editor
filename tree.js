@@ -21,6 +21,12 @@ const RANK = { M: 1, A: 2, D: 3, U: 4 };
 export const normalize = (path) =>
   path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "").replace(/^([a-z]):/, (_m, d) => `${d.toUpperCase()}:`);
 
+// A space's folder is where it was made. Its first terminal says where it is now.
+function liveFolder(space) {
+  const tabs = new Set(space?.tabs.map((t) => t.id));
+  return panes().find((p) => tabs.has(p.tab) && p.terminal && p.cwd)?.cwd;
+}
+
 // Where the tree should be. A file tab keeps the tree on that file's folder.
 export function location() {
   const space = activeSpace();
@@ -31,7 +37,7 @@ export function location() {
     if (entry) return { cwd: entry.root, on: entry.on ?? null };
   }
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : (space?.machine ?? null);
-  const cwd = pane?.cwd || f?.cwd || space?.folder;
+  const cwd = pane?.cwd || f?.cwd || liveFolder(space) || space?.folder;
   return { cwd: cwd ? normalize(cwd) : null, on };
 }
 

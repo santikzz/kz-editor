@@ -2,16 +2,18 @@
 // for JSON, and a picture for images and PDFs (binary.js).
 // Edits are saved with ctrl+s. A file changed on disk follows along while nothing is unsaved;
 // with unsaved edits it asks first, so nobody's work is overwritten.
+// An untitled tab (ctrl+n) has no file: ctrl+s asks for one, and its text goes when it closes.
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, InputState, VirtualListScrollHandle } from "gpui-base";
-import { nextCommand, readTextFile, run, settings, theme, writeTextFile } from "herdr";
-import { activeSpace, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
+import { home, nextCommand, openOverlay, readTextFile, run, settings, theme, writeTextFile } from "herdr";
+import { activeSpace, activeTab, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { extOf, languageOf } from "./lang.js";
 import { Binary, cacheSvg, viewerOf } from "./binary.js";
 import { buildMarkdown, imageSources, loadImage, parentOf, renderMarkdown, resolve } from "./markdown.js";
 import { openOutside } from "./ops.js";
 import { button } from "./ui.js";
+import { location, normalize } from "./tree.js";
 
 const EDITABLE = 400000;
 const DISK_MS = 2000;
@@ -25,6 +27,7 @@ const syntax = (t) => ({
 export class FileTab {
   constructor(p) {
     this.file = p.file ?? null;
+    this.untitled = !this.file && Boolean(p.untitled);
     this.key = p.key ?? null;
     this.images = new Map();
     this.space = p.space ?? activeSpace()?.id;
@@ -38,6 +41,7 @@ export class FileTab {
       cx.notify();
     });
     if (this.file) this.load(cx);
+    else if (this.untitled) this.show("");
     this.claim(cx);
     cx.timer.every(CLAIM_MS, (cx) => this.claim(cx));
     cx.timer.every(DISK_MS, (cx) => this.followDisk(cx));
@@ -95,6 +99,10 @@ export class FileTab {
     this.file = { path: entry.path, root: entry.root, on: entry.on ?? null };
     if (this.dirty) return this.updateTitle();
     this.load(cx);
+  }
+
+  get name() {
+    return this.file ? baseName(this.file.path) : "Untitled";
   }
 
   get isMarkdown() {
@@ -157,9 +165,9 @@ export class FileTab {
     const t = theme();
     this.eol = text.includes("\r\n") ? "\r\n" : "\n";
     this.saved = text;
-    this.editable = !this.file.on && text.length <= EDITABLE;
+    this.editable = !this.file?.on && text.length <= EDITABLE;
     this.code = EditorState.new({
-      language: languageOf(baseName(this.file.path)),
+      language: languageOf(this.name),
       value: this.editable ? text : text.slice(0, EDITABLE),
       readonly: !this.editable,
       font_family: settings().font_family,
@@ -194,6 +202,7 @@ export class FileTab {
 
   save(cx) {
     if (!this.dirty || this.saving) return;
+    if (this.untitled) return this.saveAs();
     const file = this.file;
     const value = this.code.value();
     const text = this.output();
@@ -220,6 +229,22 @@ export class FileTab {
         this.updateTitle();
         cx.notify();
       }
+    });
+  }
+
+  // Only the shown tab gets the save command, so the active tab is this one. The dialog writes
+  // the file, opens it in a kept tab and closes this one. writeTextFile writes only here.
+  saveAs() {
+    const tab = activeTab();
+    if (!isFileTab(tab) || entries()[tab]) return;
+    const { cwd, on } = location();
+    const dir = !on && cwd ? cwd : normalize(home());
+    openOverlay({
+      mod: "kz-editor",
+      kind: "dialog",
+      width: 420,
+      height: 196,
+      props: { role: "ask", action: "save-as", target: { path: dir, dir: true, root: dir, on: null }, text: this.code.value(), tab },
     });
   }
 
@@ -277,10 +302,10 @@ export class FileTab {
   }
 
   // A closing tab cannot ask, so unsaved edits are written: over the file when it has not
-  // changed on disk, else beside it as <name>.unsaved so nothing is lost.
+  // changed on disk, else beside it as <name>.unsaved so nothing is lost. Untitled text is scratch.
   async close() {
     if (this.binary) return this.binary.close();
-    if (!this.dirty) return;
+    if (!this.dirty || this.untitled) return;
     const text = this.output();
     try {
       await writeTextFile(this.file.path, text, this.saved);
@@ -309,12 +334,12 @@ export class FileTab {
   }
 
   toolbar(t, entry) {
-    const name = baseName(this.file.path);
-    const folder = this.file.path.slice(this.file.root.length + 1, -name.length - 1);
+    const name = this.name;
+    const folder = this.file ? this.file.path.slice(this.file.root.length + 1, -name.length - 1) : "";
     const icon = iconFor(this.icons, name, { light: isLight(t.background) });
     const readOnly = this.code && !this.editable ? (this.file.on ? "Read only: other machine" : "Read only: too large") : null;
     const info = this.binary?.info();
-    const openable = !this.file.on && (Boolean(this.binary) || this.unreadable);
+    const openable = !this.file?.on && (Boolean(this.binary) || this.unreadable);
     return h_flex()
       .h(34)
       .flex_none()
@@ -451,7 +476,7 @@ export class FileTab {
         this.height = size.height;
         cx.notify();
       });
-    if (!this.file) return root.child(message("No file."));
+    if (!this.file && !this.untitled) return root.child(message("No file."));
 
     root
       .child(this.toolbar(t, entry))

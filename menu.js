@@ -1,16 +1,17 @@
 // The tree's right-click menu, and the dialogs it opens: rename, new file, new folder, delete.
 // Both are overlays of this mod: props { role: "menu", target } and { role: "ask", action, target },
-// where target is { path, dir, root, on }.
+// where target is { path, dir, root, on }. An untitled tab opens "save-as" with { text, tab } too.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
-import { closeOverlay, notify, openOverlay, props, run, theme } from "herdr";
+import { closeOverlay, notify, openOverlay, props, readTextFile, run, theme, writeTextFile } from "herdr";
 import { baseName, openFile } from "./tabs.js";
 import { parentOf } from "./markdown.js";
 import * as ops from "./ops.js";
 
 const ROW = 28;
 const LINE = 9;
-const TITLES = { rename: "Rename", "new-file": "New file", "new-folder": "New folder", delete: "Delete" };
+const TITLES = { rename: "Rename", "new-file": "New file", "new-folder": "New folder", delete: "Delete", "save-as": "Save as" };
+const VERBS = { rename: "Rename", delete: "Delete", "save-as": "Save" };
 
 const ask = (action, target) => () =>
   openOverlay({ mod: "kz-editor", kind: "dialog", width: 420, height: action === "delete" ? 150 : 196, props: { role: "ask", action, target } });
@@ -145,6 +146,8 @@ export class Ask {
   constructor(p) {
     this.action = p.action;
     this.target = p.target;
+    this.text = p.text ?? "";
+    this.tab = p.tab;
   }
 
   init(cx) {
@@ -181,6 +184,15 @@ export class Ask {
         else if (action === "delete") {
           await ops.remove(target.path, target.on);
           ops.deleted(target.path);
+        } else if (action === "save-as") {
+          // null makes a new file and its folders, and fails on one that exists. readTextFile
+          // throws on a folder or a binary file, which also count as taken.
+          const path = ops.join(target.path, name);
+          if ((await readTextFile(path).catch(() => "")) !== null) throw new Error(`“${name.trim()}” already exists in this folder.`);
+          await writeTextFile(path, this.text, null);
+          ops.queue(async (cx, tree) => tree.show(path, cx));
+          openFile({ path, root: target.root, on: null }, true);
+          run("tab.close", { id: this.tab });
         } else {
           const path = await ops.create(target.path, name, action === "new-folder", target.on);
           ops.queue(async (cx, tree) => tree.show(path, cx));
@@ -250,7 +262,7 @@ export class Ask {
           .gap(8)
           .justify_end()
           .child(dialogButton("kz-ask-no", "Cancel", t, false, close))
-          .child(dialogButton("kz-ask-yes", this.busy ? "Working…" : action === "rename" ? "Rename" : action === "delete" ? "Delete" : "Create", t, true, (cx) => this.submit(cx))),
+          .child(dialogButton("kz-ask-yes", this.busy ? "Working…" : (VERBS[action] ?? "Create"), t, true, (cx) => this.submit(cx))),
       );
   }
 }
