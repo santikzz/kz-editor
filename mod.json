@@ -1,1 +1,1 @@
-{ "place": "none", "title": "kz-editor" }
+{ "place": "none", "title": "kz-editor", "overlay": { "kind": "popup", "at": "top", "offset": 72, "width": 680, "height": 0.7 } }

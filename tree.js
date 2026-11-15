@@ -22,7 +22,7 @@ export const normalize = (path) =>
   path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "").replace(/^([a-z]):/, (_m, d) => `${d.toUpperCase()}:`);
 
 // Where the tree should be. A file tab keeps the tree on that file's folder.
-function location() {
+export function location() {
   const space = activeSpace();
   const f = focused();
   const pane = f?.pane ? panes().find((p) => p.pane === f.pane) : null;

@@ -15,3 +15,7 @@ desktop.ini
 
 # Local design tool settings
 .impeccable/
+.local/
+
+# Personal settings: search excludes. The defaults are in find.js
+config.json
