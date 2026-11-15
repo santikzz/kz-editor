@@ -3,13 +3,15 @@
 // Edits are saved with ctrl+s. A file changed on disk follows along while nothing is unsaved;
 // with unsaved edits it asks first, so nobody's work is overwritten.
 import { div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { exec, nextCommand, readTextFile, run, settings, theme, window, writeTextFile } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, InputState, VirtualListScrollHandle } from "gpui-base";
+import { nextCommand, readTextFile, run, settings, theme, writeTextFile } from "herdr";
 import { activeSpace, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { extOf, languageOf } from "./lang.js";
-import { Binary, cacheSvg, imageView, viewerOf } from "./binary.js";
+import { Binary, cacheSvg, viewerOf } from "./binary.js";
 import { buildMarkdown, imageSources, loadImage, parentOf, renderMarkdown, resolve } from "./markdown.js";
+import { openOutside } from "./ops.js";
+import { button } from "./ui.js";
 
 const EDITABLE = 400000;
 const DISK_MS = 2000;
@@ -30,6 +32,7 @@ export class FileTab {
 
   init(cx) {
     this.mode = "preview";
+    this.viewer(cx);
     cx.spawn(async (cx) => {
       this.icons = await loadIcons();
       cx.notify();
@@ -41,6 +44,24 @@ export class FileTab {
     cx.spawn(async (cx) => {
       for (;;) if ((await nextCommand()) === "save") this.save(cx);
     });
+  }
+
+  // The image and PDF viewer's focus, scroll and inputs live as long as the tab: each file
+  // shown gets a new Binary, and retained state can only be made here.
+  viewer(cx) {
+    this.ui = { focus: cx.focus_handle(), list: VirtualListScrollHandle.new(), find: InputState.new({ placeholder: "Find in PDF" }), page: InputState.new({}) };
+    this.ui.find.on("change", (_e, cx) => this.binary?.search(cx));
+    this.ui.find.on("submit", (e, cx) => this.binary?.step(e.shift ? -1 : 1, cx));
+    this.ui.page.on("submit", (_e, cx) => {
+      this.binary?.goToPage(Number(this.ui.page.value()) - 1, cx);
+      this.ui.focus.focus();
+    });
+    this.ui.page.on("focus", () => (this.ui.pageFocused = true));
+    this.ui.page.on("blur", (_e, cx) => {
+      this.ui.pageFocused = false;
+      this.binary?.sync(cx);
+    });
+    cx.timer.every(250, (cx) => this.binary?.sync(cx));
   }
 
   // Finds this copy's tab by the key the tree gave it. Without one (the tree did not see
@@ -68,9 +89,11 @@ export class FileTab {
     this.updateTitle();
   }
 
+  // A renamed or moved file keeps its unsaved edits; anything else loads.
   follow(entry, cx) {
     if (!entry || entry.path === this.file?.path) return;
     this.file = { path: entry.path, root: entry.root, on: entry.on ?? null };
+    if (this.dirty) return this.updateTitle();
     this.load(cx);
   }
 
@@ -109,7 +132,7 @@ export class FileTab {
     this.mode = "preview";
     const kind = viewerOf(file.path);
     if (kind) {
-      this.binary = new Binary(file, kind);
+      this.binary = new Binary(file, kind, this.ui);
       this.binary.start(cx);
       return this.updateTitle();
     }
@@ -253,14 +276,6 @@ export class FileTab {
     if (path && path !== this.file.path) openFile({ path, root: this.file.root, on: this.file.on ?? null });
   }
 
-  // The system's own opener starts the default app for the file type.
-  openOutside() {
-    const platform = window()?.platform;
-    const path = this.file.path;
-    if (platform === "windows") exec("explorer", [path.replace(/\//g, "\\")]).catch(() => {});
-    else exec(platform === "macos" ? "open" : "xdg-open", [path]).catch(() => {});
-  }
-
   // A closing tab cannot ask, so unsaved edits are written: over the file when it has not
   // changed on disk, else beside it as <name>.unsaved so nothing is lost.
   async close() {
@@ -274,25 +289,8 @@ export class FileTab {
     }
   }
 
-  button(id, label, t, onClick, primary = false) {
-    return div()
-      .id(id)
-      .px(8)
-      .h(22)
-      .flex_none()
-      .flex()
-      .items_center()
-      .rounded(4)
-      .text_size(12)
-      .cursor_pointer()
-      .when(primary, (el) => el.bg(t.solid).text_color(t.solid_foreground))
-      .when(!primary, (el) => el.text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground)))
-      .on_click((_e, cx) => onClick(cx))
-      .child(label);
-  }
-
   toggle(id, label, active, t, onClick) {
-    return this.button(id, label, t, onClick).when(active, (el) => el.bg(t.selected).text_color(t.foreground));
+    return button(id, label, t, onClick).when(active, (el) => el.bg(t.selected).text_color(t.foreground));
   }
 
   bar(text, t, actions) {
@@ -331,8 +329,9 @@ export class FileTab {
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(folder))
       .when(Boolean(readOnly), (el) => el.child(div().flex_none().text_color(t.dim).child(readOnly)))
       .when(Boolean(info), (el) => el.child(div().flex_none().text_color(t.dim).child(info)))
+      .children((this.binary ?? (this.isSvg && this.mode === "preview" ? this.svg : null))?.controls(t) ?? [])
       .when(Boolean(entry?.preview), (el) =>
-        el.child(this.button("kz-keep", "Keep tab", t, (cx) => {
+        el.child(button("kz-keep", "Keep tab", t, (cx) => {
           setEntry(this.tab, { preview: false });
           cx.notify();
         })),
@@ -345,9 +344,9 @@ export class FileTab {
             .child(this.toggle("kz-md-source", "Source", this.mode !== "preview", t, (cx) => ((this.mode = "source"), cx.notify()))),
         ),
       )
-      .when(openable, (el) => el.child(this.button("kz-open", "Open in default app", t, () => this.openOutside())))
-      .when(this.isJson && this.editable, (el) => el.child(this.button("kz-format", "Format", t, (cx) => this.format(cx))))
-      .when(this.dirty, (el) => el.child(this.button("kz-save", this.saving ? "Saving…" : "Save", t, (cx) => this.save(cx), true)));
+      .when(openable, (el) => el.child(button("kz-open", "Open in default app", t, () => openOutside(this.file.path))))
+      .when(this.isJson && this.editable, (el) => el.child(button("kz-format", "Format", t, (cx) => this.format(cx))))
+      .when(this.dirty, (el) => el.child(button("kz-save", this.saving ? "Saving…" : "Save", t, (cx) => this.save(cx), true)));
   }
 
   // Parsed again only when the text or the appearance changes.
@@ -381,13 +380,15 @@ export class FileTab {
       this.svgText = text;
       cx.spawn(async (cx) => {
         const picture = await cacheSvg(text).catch(() => null);
-        if (this.svgText !== text) return;
-        this.svg = picture;
+        if (this.svgText !== text || !picture) return;
+        // One viewer per file, so the zoom stays while the text changes.
+        this.svg ??= new Binary(this.file, "image", this.ui);
+        this.svg.picture = picture;
         cx.notify();
       });
     }
     if (!this.svg) return div().p(16).text_color(t.dim).child("Loading…");
-    return imageView(this.svg, this.box(), t);
+    return this.svg.view(t, this.box());
   }
 
   box() {
@@ -457,8 +458,8 @@ export class FileTab {
       .when(this.conflict, (el) =>
         el.child(
           this.bar("This file changed on disk.", t, [
-            this.button("kz-load-disk", "Load disk version", t, (cx) => this.load(cx)),
-            this.button("kz-keep-mine", "Keep mine", t, (cx) => this.overwrite(cx), true),
+            button("kz-load-disk", "Load disk version", t, (cx) => this.load(cx)),
+            button("kz-keep-mine", "Keep mine", t, (cx) => this.overwrite(cx), true),
           ]),
         ),
       )

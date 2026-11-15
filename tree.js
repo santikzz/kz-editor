@@ -1,10 +1,13 @@
 // The side panel: the focused pane's folder as a tree, with git colors.
-// A click opens the file in a reusable tab, a double-click keeps that tab.
+// A click opens the file in a reusable tab, a double-click keeps that tab, a right-click
+// opens the menu (menu.js).
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, focused, panes, theme, watchFolder, window } from "herdr";
 import { activeSpace, activeTab, entries, openFile } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
+import { openMenu } from "./menu.js";
+import { clipboard, lastChange, nextJob, sameMachine } from "./ops.js";
 
 const PER_FOLDER = 500;
 const TOTAL = 5000;
@@ -75,9 +78,17 @@ export class Tree {
     this.folderMarks = {};
     this.ignored = new Set();
     this.icons = null;
+    this.seenChange = lastChange();
     cx.spawn(async (cx) => {
       this.icons = await loadIcons();
       cx.notify();
+    });
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const job = await nextJob();
+        await job(cx, this).catch(() => {});
+        cx.notify();
+      }
     });
     this.refresh(cx);
     cx.timer.every(REFRESH_MS, (cx) => this.refresh(cx));
@@ -103,8 +114,14 @@ export class Tree {
       this.watched = null;
       this.loading = false;
     }
-    if (!cwd || this.loading) return;
+    if (!cwd) return;
+    // A change while listing lists again after, so a new file is never missed.
+    if (this.loading) {
+      this.again = true;
+      return;
+    }
     this.loading = true;
+    this.again = false;
     this.limited = false;
     cx.spawn(async (cx) => {
       try {
@@ -118,9 +135,18 @@ export class Tree {
         if (this.context === context) this.error = String(e?.message ?? e);
       } finally {
         if (this.context === context) this.loading = false;
+        if (this.again && this.context === context) this.refresh(cx);
         cx.notify();
       }
     });
+  }
+
+  // Opens the folders down to a new file or folder.
+  show(path, cx) {
+    if (!this.root || !path.startsWith(`${this.root}/`)) return;
+    const parts = path.slice(this.root.length + 1).split("/");
+    for (let i = 1; i < parts.length; i++) this.folders.add(parts.slice(0, i).join("/"));
+    this.refresh(cx);
   }
 
   async loadFolder(path, context) {
@@ -244,7 +270,12 @@ export class Tree {
           .rounded(3)
           .cursor_pointer()
           .when(selected === absolute, (el) => el.bg(t.selected))
+          .when(this.cut.has(absolute), (el) => el.opacity(0.5))
           .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("right", (_e, cx) => {
+            cx.stop_propagation();
+            openMenu({ path: absolute, dir: entry.dir, root: this.root, on: this.on });
+          })
           .on_click((event, cx) => {
             if (entry.dir) {
               if (event?.click_count !== 2) this.toggle(path, cx);
@@ -273,6 +304,12 @@ export class Tree {
   render(cx) {
     const { cwd, on } = location();
     if (JSON.stringify({ cwd, on }) !== this.context) this.refresh(cx);
+    if (lastChange() !== this.seenChange) {
+      this.seenChange = lastChange();
+      this.refresh(cx);
+    }
+    const clip = clipboard();
+    this.cut = new Set(clip?.cut && sameMachine(clip.on, this.on) ? clip.paths : []);
     const t = theme();
     const selected = entries()[activeTab()]?.path;
     const empty = !this.entries.get("")?.length;
@@ -309,6 +346,9 @@ export class Tree {
           .overflow_y_scrollbar()
           .px(4)
           .py(4)
+          .on_mouse_down("right", () => {
+            if (this.root) openMenu({ path: this.root, dir: true, root: this.root, on: this.on });
+          })
           .children(this.rows("", 0, [], selected, t))
           .when(Boolean(this.error) || empty, (el) => el.child(div().p(8).text_size(12).text_color(t.dim).child(message)))
           .when(Boolean(this.limited), (el) =>
