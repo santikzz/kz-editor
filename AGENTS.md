@@ -56,7 +56,8 @@ Do not edit `gpui-kit.d.ts` or `jsconfig.json`. Herdr writes them.
 
 Do not investigate these again:
 
-- `EditorState` has only `value`, `set_value`, `on` and `release`. It cannot move the cursor, select or scroll to a line.
+- `EditorState` has only `value`, `set_value`, `on` and `release`. It cannot move the cursor, select or scroll to a line. The `__input_*` host calls do not take its handle.
+- The editor has no find panel: ctrl+f does nothing. Undo is ctrl+z and redo is ctrl+y. A mod cannot call these native actions: `window.dispatch_action` goes to Herdr's commands.
 - `rg` is not on the PATH that `exec` uses. Use `git ls-files` and `git grep`.
 - A scroll area in a popup that fits its content gets no height. Give it a height from its rows.
 - `.child()` takes one element. An array goes to `.children()`.
