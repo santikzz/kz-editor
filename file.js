@@ -399,11 +399,8 @@ export class FileTab {
     const light = isLight(t.background);
     const text = this.code.value();
     const key = `${light}\0${text}`;
-    // Herdr stops a render that runs too long, and a long file takes longer to parse,
-    // so it parses in a timer. The last preview stays until the next is ready.
     if (this.markdownKey !== key) {
       this.markdownKey = key;
-<<<<<<< HEAD
       cx.spawn(async (cx) => {
         let markdown = null;
         let error = null;
@@ -416,17 +413,6 @@ export class FileTab {
         this.markdown = markdown;
         this.markdownError = error;
         if (markdown) this.loadImages(cx);
-=======
-      cx.timer.after(0, (cx) => {
-        if (this.markdownKey !== key) return;
-        try {
-          this.markdown = buildMarkdown(text, light);
-          this.markdownError = null;
-          this.loadImages(cx);
-        } catch (e) {
-          this.markdownError = `This file cannot be previewed: ${e?.message ?? e}`;
-        }
->>>>>>> 89059f2cf914e9a1b126a613dce9efed1e5a736f
         cx.notify();
       });
     }
