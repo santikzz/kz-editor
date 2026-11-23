@@ -5,19 +5,37 @@
 // An untitled tab (ctrl+n) has no file: ctrl+s asks for one, and its text goes when it closes.
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, InputState, VirtualListScrollHandle } from "gpui-base";
-import { home, nextCommand, openOverlay, readTextFile, run, settings, theme, writeTextFile } from "herdr";
+import { appHome, exec, home, nextCommand, openOverlay, readTextFile, run, settings, theme, writeTextFile } from "herdr";
 import { activeSpace, activeTab, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { extOf, languageOf } from "./lang.js";
 import { Binary, cacheSvg, viewerOf } from "./binary.js";
 import { buildMarkdown, imageSources, loadImage, parentOf, renderMarkdown, resolve } from "./markdown.js";
-import { openOutside } from "./ops.js";
+import { openOutside, platform } from "./ops.js";
 import { button } from "./ui.js";
 import { location, normalize } from "./tree.js";
 
 const EDITABLE = 400000;
 const DISK_MS = 2000;
 const CLAIM_MS = 500;
+
+// writeTextFile writes only here. A file on another machine goes through a temp file here
+// and `hc file write --on`, which takes the text on stdin. Local Windows has no sh for that.
+const writable = (on) => !on || platform() !== "windows";
+
+async function write(file, text, expected) {
+  if (!file.on) return writeTextFile(file.path, text, expected);
+  // ponytail: read then write, so a change in the gap is lost; use a compare-and-write in hc if it gets one
+  const current = await readTextFile(file.path, { on: file.on });
+  if (current !== expected) throw new Error("The file changed on disk.");
+  const dir = `${normalize(appHome())}/mods/kz-editor/.cache`;
+  const tmp = `${dir}/save-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await exec("mkdir", ["-p", dir]);
+  await writeTextFile(tmp, text, null);
+  const script = 'hc file write --on "$1" "$2" < "$3" > /dev/null; c=$?; rm -f -- "$3"; exit $c';
+  const r = await exec("sh", ["-c", script, "kz-editor", file.on, file.path, tmp]);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || "Could not write on the other machine.");
+}
 
 const syntax = (t) => ({
   keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1,
@@ -166,7 +184,7 @@ export class FileTab {
     const t = theme();
     this.eol = text.includes("\r\n") ? "\r\n" : "\n";
     this.saved = text;
-    this.editable = !this.file?.on && text.length <= EDITABLE;
+    this.editable = writable(this.file?.on) && text.length <= EDITABLE;
     this.code = EditorState.new({
       language: languageOf(this.name),
       value: this.editable ? text : text.slice(0, EDITABLE),
@@ -214,13 +232,13 @@ export class FileTab {
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        await writeTextFile(file.path, text, expected);
+        await write(file, text, expected);
         if (this.file === file) {
           this.saved = text;
           this.baseline = value;
         }
       } catch (e) {
-        const current = await readTextFile(file.path).catch(() => null);
+        const current = await readTextFile(file.path, { on: file.on }).catch(() => null);
         if (this.file === file) {
           if (current !== expected) this.conflict = true;
           else this.notice = `Could not save: ${e?.message ?? e}`;
@@ -253,7 +271,7 @@ export class FileTab {
   overwrite(cx) {
     const file = this.file;
     cx.spawn(async (cx) => {
-      const current = await readTextFile(file.path).catch(() => null);
+      const current = await readTextFile(file.path, { on: file.on }).catch(() => null);
       if (this.file !== file) return;
       this.saved = current;
       this.conflict = false;
@@ -309,9 +327,9 @@ export class FileTab {
     if (!this.dirty || this.untitled) return;
     const text = this.output();
     try {
-      await writeTextFile(this.file.path, text, this.saved);
+      await write(this.file, text, this.saved);
     } catch {
-      await writeTextFile(`${this.file.path}.unsaved`, text, null).catch(() => {});
+      await write({ ...this.file, path: `${this.file.path}.unsaved` }, text, null).catch(() => {});
     }
   }
 
@@ -381,8 +399,11 @@ export class FileTab {
     const light = isLight(t.background);
     const text = this.code.value();
     const key = `${light}\0${text}`;
+    // Herdr stops a render that runs too long, and a long file takes longer to parse,
+    // so it parses in a timer. The last preview stays until the next is ready.
     if (this.markdownKey !== key) {
       this.markdownKey = key;
+<<<<<<< HEAD
       cx.spawn(async (cx) => {
         let markdown = null;
         let error = null;
@@ -395,6 +416,17 @@ export class FileTab {
         this.markdown = markdown;
         this.markdownError = error;
         if (markdown) this.loadImages(cx);
+=======
+      cx.timer.after(0, (cx) => {
+        if (this.markdownKey !== key) return;
+        try {
+          this.markdown = buildMarkdown(text, light);
+          this.markdownError = null;
+          this.loadImages(cx);
+        } catch (e) {
+          this.markdownError = `This file cannot be previewed: ${e?.message ?? e}`;
+        }
+>>>>>>> 89059f2cf914e9a1b126a613dce9efed1e5a736f
         cx.notify();
       });
     }

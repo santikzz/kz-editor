@@ -127,7 +127,7 @@ Every 2 seconds, kz-editor reads each open file from disk:
 - Text search starts at 2 characters and shows 5 lines per file, 200 lines in total.
 - Syntax colors for 15 languages. TypeScript and PHP use the JavaScript colors, Vue and Svelte use the HTML colors. Other files open without colors.
 - Files over 400 KB open read-only. Files over 1 MB do not open.
-- Files on other machines open read-only. Images and PDFs on other machines do not open.
+- Files on other machines save through `hc file write`, so `hc` must be on the PATH. A save checks that the file did not change, then writes it, so a change in that short gap is lost. On Windows, files on other machines open read-only. Images and PDFs on other machines do not open.
 - The tree shows 500 entries per folder and 5,000 in total.
 - The Markdown preview shows the first 32 KB of a file. Source shows all of it.
 - A PDF shows its first 50 pages. On macOS and Linux, PDFs need poppler (`pdftoppm`, `pdfinfo`, `pdftotext`).
