@@ -133,6 +133,7 @@ export class FileTab {
     this.code = null;
     this.markdown = null;
     this.markdownKey = null;
+    this.markdownError = null;
     this.images = new Map();
     this.problem = null;
     this.notice = null;
@@ -374,22 +375,31 @@ export class FileTab {
       .when(this.dirty, (el) => el.child(button("kz-save", this.saving ? "Saving…" : "Save", t, (cx) => this.save(cx), true)));
   }
 
-  // Parsed again only when the text or the appearance changes.
+  // Parsed again only when the text or the appearance changes. A long file takes more than
+  // one render may run, so a task builds it. The last preview stays until the next is ready.
   preview(t, cx) {
     const light = isLight(t.background);
     const text = this.code.value();
     const key = `${light}\0${text}`;
     if (this.markdownKey !== key) {
       this.markdownKey = key;
-      try {
-        this.markdown = buildMarkdown(text, light);
-        this.markdownError = null;
-        this.loadImages(cx);
-      } catch (e) {
-        this.markdownError = `This file cannot be previewed: ${e?.message ?? e}`;
-      }
+      cx.spawn(async (cx) => {
+        let markdown = null;
+        let error = null;
+        try {
+          markdown = await buildMarkdown(text, light, cx);
+        } catch (e) {
+          error = `This file cannot be previewed: ${e?.message ?? e}`;
+        }
+        if (this.markdownKey !== key) return;
+        this.markdown = markdown;
+        this.markdownError = error;
+        if (markdown) this.loadImages(cx);
+        cx.notify();
+      });
     }
     if (this.markdownError) return div().p(16).text_color(t.dim).child(this.markdownError);
+    if (!this.markdown) return div().p(16).text_color(t.dim).child("Loading…");
     const actions = {
       onLink: (url, cx) => this.followLink(url, cx),
       onCopy: (index, code, cx) => this.copyCode(index, code, cx),

@@ -56,12 +56,16 @@ Do not edit `gpui-kit.d.ts` or `jsconfig.json`. Herdr writes them.
 
 Do not investigate these again:
 
-- `EditorState` has only `value`, `set_value`, `on` and `release`. It cannot move the cursor, select or scroll to a line.
+- `EditorState` has only `value`, `set_value`, `on` and `release`. It cannot move the cursor, select or scroll to a line. The `__input_*` host calls do not take its handle.
+- The editor has no find panel: ctrl+f does nothing. Undo is ctrl+z and redo is ctrl+y. A mod cannot call these native actions: `window.dispatch_action` goes to Herdr's commands.
 - `rg` is not on the PATH that `exec` uses. Use `git ls-files` and `git grep`.
 - A scroll area in a popup that fits its content gets no height. Give it a height from its rows.
 - `.child()` takes one element. An array goes to `.children()`.
 - `console.log` does not show in `herdr-app check`. To inspect a value, throw an error that contains it.
 - When you save any file in the mod folder, `config.json` too, every copy of the mod loads again.
+- Herdr stops a script call (a render, a handler, one step of a task) after about 50 ms with `interrupted`. No `catch` sees it. Split long work and `await cx.sleep(0)` between the parts. Each part gets a new budget.
+- QuickJS tries a `^` regex at every position of the string. On a long string, each `exec` is slow. Run regex parsers on short parts.
+- `list()` rows take no click handlers.
 
 ## When a feature is done
 

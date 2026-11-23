@@ -8,6 +8,7 @@ import { activeSpace, activeTab, entries, openFile } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { openMenu } from "./menu.js";
 import { clipboard, lastChange, nextJob, sameMachine } from "./ops.js";
+import { ps } from "./markdown.js";
 
 const PER_FOLDER = 500;
 const TOTAL = 5000;
@@ -44,9 +45,9 @@ export function location() {
 async function listFolder(path, on) {
   if (!on && window()?.platform === "windows") {
     const script =
-      "& { param($p) @(Get-ChildItem -LiteralPath $p -Force -ErrorAction Stop | Where-Object Name -ne '.git' | Select-Object -First 501 | " +
-      "ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress }";
-    const r = await exec("powershell", ["-NoProfile", "-Command", script, path]);
+      `[Console]::OutputEncoding = [Text.Encoding]::UTF8; @(Get-ChildItem -LiteralPath ${ps(path)} -Force -ErrorAction Stop | Where-Object Name -ne '.git' | Select-Object -First 501 | ` +
+      "ForEach-Object { @{ name=$_.Name; dir=($_.PSIsContainer -and -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint)) } }) | ConvertTo-Json -Compress";
+    const r = await exec("powershell", ["-NoProfile", "-Command", script]);
     if (r.code !== 0) throw new Error(r.stderr || "Cannot list this folder");
     const result = JSON.parse(r.stdout || "[]");
     return Array.isArray(result) ? result : [result];

@@ -5,7 +5,7 @@ import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { appHome, exec, fonts, settings, window } from "herdr";
 import * as fs from "fs/promises";
-import { lexer } from "./vendor/marked.esm.js";
+import { Lexer } from "./vendor/marked.esm.js";
 import { extOf, grammarOf } from "./lang.js";
 
 // Primer colors, as github.com draws a README in each appearance.
@@ -167,9 +167,98 @@ function htmlBlocks(raw) {
   return blocks;
 }
 
-export function buildMarkdown(text, light) {
+// Herdr stops a script that runs more than about 50 ms at once, and no catch sees it.
+// Every pause (cx.sleep) starts a new budget, so the build pauses after each slice.
+const SLICE_MS = 15;
+// ponytail: one render draws every block, about 25 ms for 32 KB of code, so the preview
+// stops there. Herdr's list() draws only the visible rows, but its rows take no click handlers.
+const PREVIEW_MAX = 32 * 1024;
+
+// QuickJS tries each "^" rule at every position of the text that is left, so marked takes
+// quadratic time on one long text. Short chunks lex fast. A chunk starts at a line in
+// column 0 after a blank line: that ends every block except code fences, HTML blocks and
+// lists. The open blocks follow marked's rules: a fence mark inside an HTML block is text.
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+// HTML blocks that end at their end mark. The last three cannot start inside a paragraph.
+const RAW_HTML = /^ {0,3}<(!--|(?:script|pre|style|textarea)(?=[\s>]|$))/i;
+const RAW_HTML_ALONE = /^ {0,3}<(!\[CDATA\[|\?|!(?=[a-z]))/i;
+const RAW_END = { "!--": "-->", "![cdata[": "]]>", "?": "?>", "!": ">" };
+// HTML blocks that end at a blank line: marked's block tags, or a line that is only a tag
+// and does not continue a paragraph. As in marked, no tag name that starts with script,
+// pre, style or textarea makes a line a tag line.
+const BLOCK_TAGS =
+  "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul";
+const BLOCK_HTML = new RegExp(`^ {0,3}</?(?:${BLOCK_TAGS})(?: |/?>|$)`, "i");
+const TAG_LINE =
+  /^ {0,3}(?:<(?!script|pre|style|textarea)[a-z][\w-]*(?: +[a-z:_][\w.:-]*(?: *= *(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)* *\/?>|<\/(?!script|pre|style|textarea)[a-z][\w-]*\s*>)\s*$/i;
+const LIST_ITEM = /^(?:[*+-]|\d{1,9}[.)])(?:\s|$)/;
+const HEADING = /^ {0,3}#{1,6}(?:\s|$)/;
+
+// Returns the test for the line that ends the block this line opens, or null.
+// free: the line before ended a block, so this line cannot continue a paragraph.
+function opens(line, free) {
+  const fence = FENCE.exec(line);
+  if (fence) {
+    const end = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}\\s*$`);
+    return (next) => end.test(next);
+  }
+  const raw = RAW_HTML.exec(line) ?? (free ? RAW_HTML_ALONE.exec(line) : null);
+  if (raw) {
+    const name = raw[1].toLowerCase();
+    const end = RAW_END[name] ?? `</${name}>`;
+    if (line.toLowerCase().includes(end, raw[0].length)) return null;
+    return (next) => next.toLowerCase().includes(end);
+  }
+  if (BLOCK_HTML.test(line) || (free && TAG_LINE.test(line))) return (next) => !next.trim();
+  return null;
+}
+
+function chunks(text) {
+  const out = [];
+  let lines = [];
+  let close = null;
+  let blank = true;
+  let free = true;
+  for (const line of text.split("\n")) {
+    if (!close && blank && lines.length && /^\S/.test(line) && !LIST_ITEM.test(line)) {
+      out.push(lines.join("\n") + "\n");
+      lines = [];
+    }
+    lines.push(line);
+    blank = !line.trim();
+    if (close) {
+      if (close(line)) close = null;
+      free = !close;
+    } else {
+      close = opens(line, free);
+      free = blank || HEADING.test(line);
+    }
+  }
+  out.push(lines.join("\n"));
+  return out;
+}
+
+export async function buildMarkdown(text, light, cx) {
+  let start = Date.now();
+  const pause = async () => {
+    if (Date.now() - start < SLICE_MS) return;
+    await cx.sleep(0);
+    start = Date.now();
+  };
+  const lexer = new Lexer({ gfm: true });
+  const source = text.replace(/\r\n?/g, "\n");
+  for (const chunk of chunks(source.slice(0, PREVIEW_MAX))) {
+    lexer.blockTokens(chunk, lexer.tokens);
+    await pause();
+  }
+  // The inline pass of marked's lex(), after every link definition is known.
+  for (const { src, tokens } of lexer.inlineQueue) {
+    lexer.inlineTokens(src, tokens);
+    await pause();
+  }
   const blocks = [];
-  for (const token of lexer(text, { gfm: true })) {
+  for (const token of lexer.tokens) {
+    await pause();
     if (token.type === "heading") blocks.push({ kind: "heading", depth: token.depth, text: plain(token.tokens) });
     else if (token.type === "paragraph") {
       const images = imagesOf(token.tokens);
@@ -188,7 +277,7 @@ export function buildMarkdown(text, light) {
     else if (token.type === "html") blocks.push(...htmlBlocks(token.raw));
     else if (token.type !== "space" && token.type !== "def") blocks.push({ kind: "text", md: tidy(token.raw) });
   }
-  return { blocks, palette: light ? LIGHT : DARK };
+  return { blocks, palette: light ? LIGHT : DARK, cut: source.length > PREVIEW_MAX };
 }
 
 export const imageSources = (md) => md.blocks.flatMap((b) => (b.kind === "images" ? b.images.map((i) => i.src) : []));
@@ -447,6 +536,9 @@ export function renderMarkdown(md, shown, actions, width) {
         .text_size(BODY_SIZE)
         .text_color(p.text)
         .when(Boolean(font), (el) => el.font_family(font))
-        .children(md.blocks.map((block, i) => drawBlock(block, i, p, shown, actions, max).mt(gap(block, i)))),
+        .children(md.blocks.map((block, i) => drawBlock(block, i, p, shown, actions, max).mt(gap(block, i))))
+        .when(md.cut, (el) =>
+          el.child(div().mt(24).pt(16).border_t(1).border_color(p.rule).text_color(p.muted).child(`The preview shows the first ${PREVIEW_MAX / 1024} KB. Use Source to see all of the file.`)),
+        ),
     );
 }
