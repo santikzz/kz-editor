@@ -10,7 +10,9 @@ Open files from the [Herdr](https://herdr.dev) side panel in their own tabs, nex
 - Right-click menu: open, reveal in the file manager, open a terminal, new file or folder, cut, copy, paste, copy path, rename, delete to the Recycle Bin or Trash
 - Search with <kbd>Ctrl</kbd> <kbd>E</kbd>: file names, paths and text in files, ranked like VS Code Quick Open
 - One tab for each file. A click opens a preview tab, a double-click or an edit keeps it
-- Editor with syntax colors, line numbers, folding, multiple cursors, and undo and redo
+- Editor with VS Code syntax colors (Dark+ or Light+), line numbers, folding, multiple cursors, and undo and redo
+- Find in file, like the <kbd>Ctrl</kbd> <kbd>E</kbd> search: every match as a line to pick, match case and regular expressions, and a replace row. Go to line
+- The indent of each file: tabs, or 2 or 4 spaces
 - Untitled tab with <kbd>Ctrl</kbd> <kbd>N</kbd> for a quick note or a new file. <kbd>Ctrl</kbd> <kbd>S</kbd> asks where to save it
 - Markdown preview in the GitHub style, with a switch to the source
 - Images (PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, SVG) and PDFs, with zoom and PDF text find
@@ -41,7 +43,14 @@ Open files from the [Herdr](https://herdr.dev) side panel in their own tabs, nex
      "ctrl-e": "mod.open:kz-editor",
      "ctrl-n": { "command": "tab.new", "args": { "name": "Untitled", "mod": "kz-editor", "props": { "role": "file", "untitled": true } } }
    },
-   "mod:kz-editor": { "ctrl-s": "kz-editor.save" }
+   "mod:kz-editor": {
+     "ctrl-s": "kz-editor.save",
+     "ctrl-f": "kz-editor.find",
+     "ctrl-h": "kz-editor.replace",
+     "ctrl-g": "kz-editor.goto",
+     "ctrl-d": "kz-editor.next",
+     "alt-z": "kz-editor.wrap"
+   }
    ```
 
 4. Check the mod:
@@ -54,7 +63,7 @@ With the Better Icons mod, the tree shows Material file icons.
 
 ## Keybinds
 
-Herdr reads all keys from `keys.json`. To use other keys, bind them to `mod.open:kz-editor` (search), `kz-editor.save` (save) and the `tab.new` action above (untitled tab).
+Herdr reads all keys from `keys.json`. To use other keys, bind them to `mod.open:kz-editor` (search), the `kz-editor.*` commands above and the `tab.new` action above (untitled tab). The `mod:kz-editor` keys work only while kz-editor has the keyboard, so the terminals keep them.
 
 | Key | Action |
 |---|---|
@@ -64,13 +73,20 @@ Herdr reads all keys from `keys.json`. To use other keys, bind them to `mod.open
 | <kbd>Esc</kbd> | Close the search |
 | <kbd>Ctrl</kbd> <kbd>S</kbd> | Save. On macOS, <kbd>Cmd</kbd> <kbd>S</kbd>. In an untitled tab, Save as |
 | <kbd>Ctrl</kbd> <kbd>N</kbd> | Open an untitled tab |
+| <kbd>Ctrl</kbd> <kbd>F</kbd> | Find in the file. A one-line selection becomes the query. In a PDF, find text |
+| <kbd>Up</kbd> <kbd>Down</kbd>, <kbd>Enter</kbd> | Pick a match, go to it |
+| <kbd>Alt</kbd> <kbd>C</kbd>, <kbd>Alt</kbd> <kbd>R</kbd> | Match case, regular expressions |
+| <kbd>Ctrl</kbd> <kbd>H</kbd> | Find and replace. The chevron in the find card also opens the replace row. <kbd>Enter</kbd> in the replace field replaces the picked match |
+| <kbd>Ctrl</kbd> <kbd>G</kbd> | Go to a line, or `line:column` |
+| <kbd>Ctrl</kbd> <kbd>D</kbd> | Select the word at the cursor, then the next match of the selection |
+| <kbd>Alt</kbd> <kbd>Z</kbd> | Wrap long lines, or stop |
+| <kbd>Esc</kbd> | Close the find card |
 | <kbd>Ctrl</kbd> <kbd>Z</kbd> | Undo |
 | <kbd>Ctrl</kbd> <kbd>Y</kbd> | Redo. On macOS, <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>Z</kbd> |
 | Click a file | Open it in the preview tab |
 | Double-click a file | Open it and keep the tab |
 | Right-click in the tree | Open the file menu |
 | <kbd>Ctrl</kbd> + mouse wheel | Zoom an image or a PDF |
-| <kbd>Ctrl</kbd> <kbd>F</kbd> | Find text in a PDF |
 | <kbd>Page Up</kbd> <kbd>Page Down</kbd> | Go to the next or previous PDF page |
 
 Shells use <kbd>Ctrl</kbd> <kbd>E</kbd> to go to the end of the line, and <kbd>Ctrl</kbd> <kbd>N</kbd> for the next command in the history. With these bindings, use <kbd>End</kbd> and <kbd>Down</kbd> in the terminal.
@@ -119,13 +135,13 @@ Every 2 seconds, kz-editor reads each open file from disk:
 ## Limits
 
 - No IntelliSense or go to definition. Herdr does not give mods these parts of its editor.
-- A text result opens its file at line 1. The Herdr editor cannot move to a line.
-- No find or replace in a text file. The Herdr editor has no find panel, and a mod cannot move its cursor or scroll it.
+- The editor has one selection. <kbd>Ctrl</kbd> <kbd>D</kbd> moves it to the next match. It does not add a cursor.
+- The editor cannot mark all matches. The find card lists them instead, the first 200.
 - An untitled tab keeps its text only while it is open. Closing it or restarting Herdr discards the text.
 - Save as writes on this computer only: in the folder of the space's first terminal, or a folder under it. For a space on another machine, in your home folder.
 - The search needs `git`. In a very large folder outside git, such as your home folder, listing stops after 10 seconds.
 - Text search starts at 2 characters and shows 5 lines per file, 200 lines in total.
-- Syntax colors for 15 languages. TypeScript and PHP use the JavaScript colors, Vue and Svelte use the HTML colors. Other files open without colors.
+- Herdr has no TypeScript grammar. TypeScript uses the C# colors, because the JavaScript grammar stops at the first type. Vue and Svelte use the HTML colors, TOML uses YAML. Files without a grammar open without colors. A mod cannot add grammars.
 - Files over 400 KB open read-only. Files over 1 MB do not open.
 - Files on other machines save through `hc file write`, so `hc` must be on the PATH. A save checks that the file did not change, then writes it, so a change in that short gap is lost. On Windows, files on other machines open read-only. Images and PDFs on other machines do not open.
 - The tree shows 500 entries per folder and 5,000 in total.
@@ -133,7 +149,7 @@ Every 2 seconds, kz-editor reads each open file from disk:
 - A PDF shows its first 50 pages. On macOS and Linux, PDFs need poppler (`pdftoppm`, `pdfinfo`, `pdftotext`).
 - The Markdown preview shows Mermaid diagrams and math as code.
 - The tree menu acts on one item at a time and uses its own clipboard. On another machine, Delete removes the item permanently.
-- Tested on Windows 10 with Herdr 0.1.15. macOS and Linux are not tested.
+- Tested on Windows 10 with Herdr 0.1.18. macOS and Linux are not tested.
 
 ## License
 

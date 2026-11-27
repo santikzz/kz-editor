@@ -1,5 +1,6 @@
 // Small controls shared by the file tab, the image and PDF viewer and the tree menu.
 import { div, svg } from "gpui-kit";
+import { h_flex } from "gpui-base";
 
 export const icon = (name, color, size = 14) => svg(`mods/kz-editor/icons/${name}.svg`).size(size).flex_none().text_color(color);
 
@@ -32,3 +33,23 @@ export function iconButton(id, name, t, onClick, enabled = true) {
     .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click((_e, cx) => onClick(cx)))
     .child(icon(name, enabled ? t.muted : t.dim));
 }
+
+// A key as a small cap, for the footers of the spotlights.
+export function keycap(child, t) {
+  return h_flex()
+    .h(20)
+    .min_w(20)
+    .px(4)
+    .flex_none()
+    .items_center()
+    .justify_center()
+    .rounded(4)
+    .border_1()
+    .border_color(t.border)
+    .bg(t.raised)
+    .text_size(11)
+    .text_color(t.muted)
+    .child(child);
+}
+
+export const hint = (keys, label) => h_flex().gap(4).items_center().children(keys).child(div().pl(4).child(label));

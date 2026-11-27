@@ -4,12 +4,12 @@
 import { div, image } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState, ScrollHandle } from "gpui-base";
 import { closeOverlay, props, settings, theme } from "herdr";
-import { activeSpace, entries, isFileTab, openFile, spaceTabs } from "./tabs.js";
+import { activeSpace, entries, isFileTab, openFile, revealAt, spaceTabs } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { location } from "./tree.js";
 import { grepText, listFiles, readConfig } from "./find.js";
 import { rankFiles, snippet } from "./match.js";
-import { icon } from "./ui.js";
+import { hint, icon, keycap } from "./ui.js";
 
 const FILE_LIMIT = 12;
 const TEXT_LIMIT = 200;
@@ -162,7 +162,9 @@ export class Search {
   // VS Code opens files from Quick Open as kept tabs, not preview tabs.
   open(row) {
     if (!row) return;
-    openFile(row.kind === "open" ? row.file : { path: `${this.root}/${row.path}`, root: this.root, on: this.on }, true);
+    const file = row.kind === "open" ? row.file : { path: `${this.root}/${row.path}`, root: this.root, on: this.on };
+    if (row.kind === "line") revealAt(file.path, row.line, this.text?.query ?? "");
+    openFile(file, true);
     closeOverlay(props()?.overlay);
   }
 
@@ -276,27 +278,6 @@ export class Search {
     return line(`Nothing matches “${this.query.trim()}”.`);
   }
 
-  keycap(child, t) {
-    return h_flex()
-      .h(20)
-      .min_w(20)
-      .px(4)
-      .flex_none()
-      .items_center()
-      .justify_center()
-      .rounded(4)
-      .border_1()
-      .border_color(t.border)
-      .bg(t.raised)
-      .text_size(11)
-      .text_color(t.muted)
-      .child(child);
-  }
-
-  hint(keys, label, t) {
-    return h_flex().gap(4).items_center().children(keys).child(div().pl(4).child(label));
-  }
-
   status(t) {
     if (this.config?.problem) return div().text_color(t.ansi1).truncate().child(this.config.problem);
     if (this.textError) return div().text_color(t.ansi1).truncate().child(`Text search: ${this.textError}`);
@@ -367,9 +348,9 @@ export class Search {
           .border_color(t.border)
           .text_size(12)
           .text_color(t.muted)
-          .child(this.hint([this.keycap(icon("arrow-up", t.muted, 12), t), this.keycap(icon("arrow-down", t.muted, 12), t)], "Move", t))
-          .child(this.hint([this.keycap(icon("corner-down-left", t.muted, 12), t)], "Open", t))
-          .child(this.hint([this.keycap("Esc", t)], "Close", t))
+          .child(hint([keycap(icon("arrow-up", t.muted, 12), t), keycap(icon("arrow-down", t.muted, 12), t)], "Move"))
+          .child(hint([keycap(icon("corner-down-left", t.muted, 12), t)], "Open"))
+          .child(hint([keycap("Esc", t)], "Close"))
           .child(h_flex().flex_1().min_w(0).justify_end().text_color(t.dim).child(this.status(t))),
       );
   }

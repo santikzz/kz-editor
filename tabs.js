@@ -6,6 +6,7 @@ import { panes, run, setShared, shared, spaces } from "herdr";
 const KEY = "kz-editor.tabs";
 const MOD = "kz-editor";
 const OPENING_MS = 1500;
+const REVEAL_MS = 5000;
 
 // Module scope is shared by every copy of this mod, so the tree and the new tab both see it.
 let opening = null;
@@ -65,6 +66,17 @@ export function openFile(file, keep = false) {
 }
 
 export const spaceTabs = (space) => spaces().find((s) => s.id === space)?.tabs ?? [];
+
+// A text result of the search asks the tab of its file to select the match on its line.
+let reveal = null;
+export const revealAt = (path, line, query) => (reveal = { path, line, query, at: Date.now() });
+
+export function takeReveal(path) {
+  if (!path || reveal?.path !== path || Date.now() - reveal.at > REVEAL_MS) return null;
+  const taken = reveal;
+  reveal = null;
+  return taken;
+}
 
 // Called by a new file tab: whether a double-click asked to keep it while it was opening.
 export function takeOpening(path) {

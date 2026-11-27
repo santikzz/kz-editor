@@ -6,7 +6,9 @@
 import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, InputState, VirtualListScrollHandle } from "gpui-base";
 import { appHome, exec, home, nextCommand, openOverlay, readTextFile, run, settings, theme, writeTextFile } from "herdr";
-import { activeSpace, activeTab, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening } from "./tabs.js";
+import { activeSpace, activeTab, baseName, entries, isFileTab, openFile, setEntry, spaceTabs, takeOpening, takeReveal } from "./tabs.js";
+import { FindCard } from "./findcard.js";
+import { indentOf, nextOccurrence, offsetOf } from "./match.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { extOf, languageOf } from "./lang.js";
 import { Binary, cacheSvg, viewerOf } from "./binary.js";
@@ -18,6 +20,19 @@ import { location, normalize } from "./tree.js";
 const EDITABLE = 400000;
 const DISK_MS = 2000;
 const CLAIM_MS = 500;
+
+// The editor binds ctrl+f and ctrl+h to its own find, which Herdr's build does not have, and its
+// bindings come before keys.json. These sit in the same "Input" context and are newer, so they
+// come first. In an input outside a file tab nothing handles them, and its own binding runs.
+let keysBound = false;
+function bindEditorKeys(cx) {
+  if (keysBound) return;
+  keysBound = true;
+  cx.bind_keys([
+    { keystroke: "ctrl-f", action: "kz_find", context: "Input" },
+    { keystroke: "ctrl-h", action: "kz_replace", context: "Input" },
+  ]);
+}
 
 // writeTextFile writes only here. A file on another machine goes through a temp file here
 // and `hc file write --on`, which takes the text on stdin. Local Windows has no sh for that.
@@ -37,10 +52,19 @@ async function write(file, text, expected) {
   if (r.code !== 0) throw new Error(r.stderr.trim() || "Could not write on the other machine.");
 }
 
-const syntax = (t) => ({
-  keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1,
-  constant: t.ansi6, boolean: t.ansi6, "string.escape": t.ansi6,
-});
+// Code colors are VS Code's Dark+ and Light+, fixed hex as the Markdown preview uses GitHub's:
+// most theme ANSI colors are too pale to tell tokens apart. The editor takes only these keys.
+// Calls and parameters are both "variable", so calls are blue, not yellow as in VS Code.
+// "//" is "punctuation", not "comment", so punctuation is a quiet gray instead of the text color.
+const DARK = {
+  keyword: "#C586C0", string: "#CE9178", comment: "#6A9955", function: "#DCDCAA", type: "#4EC9B0", number: "#B5CEA8",
+  constant: "#4FC1FF", boolean: "#569CD6", "string.escape": "#D7BA7D", variable: "#9CDCFE", operator: "#D4D4D4", punctuation: "#808080",
+};
+const LIGHT = {
+  keyword: "#AF00DB", string: "#A31515", comment: "#008000", function: "#795E26", type: "#267F99", number: "#098658",
+  constant: "#0070C1", boolean: "#0000FF", "string.escape": "#EE0000", variable: "#001080", operator: "#000000", punctuation: "#6E6E6E",
+};
+const syntax = (t) => (isLight(t.background) ? LIGHT : DARK);
 
 export class FileTab {
   constructor(p) {
@@ -54,6 +78,8 @@ export class FileTab {
   init(cx) {
     this.mode = "preview";
     this.viewer(cx);
+    this.find = new FindCard(this);
+    bindEditorKeys(cx);
     cx.spawn(async (cx) => {
       this.icons = await loadIcons();
       cx.notify();
@@ -61,11 +87,51 @@ export class FileTab {
     if (this.file) this.load(cx);
     else if (this.untitled) this.show("");
     this.claim(cx);
-    cx.timer.every(CLAIM_MS, (cx) => this.claim(cx));
+    cx.timer.every(CLAIM_MS, (cx) => {
+      this.claim(cx);
+      this.reveal(cx);
+    });
     cx.timer.every(DISK_MS, (cx) => this.followDisk(cx));
     cx.spawn(async (cx) => {
-      for (;;) if ((await nextCommand()) === "save") this.save(cx);
+      for (;;) this.command(await nextCommand(), cx);
     });
+  }
+
+  // Keys from the mod:kz-editor section of keys.json. Only the shown copy gets them.
+  command(name, cx) {
+    if (name === "save") return this.save(cx);
+    if (name === "find" && this.binary) return this.binary.openFind(cx);
+    if (!this.code) return;
+    if (name === "wrap") {
+      this.wrap = !this.wrap;
+      return this.code.set_soft_wrap(this.wrap);
+    }
+    if (!["find", "replace", "goto", "next"].includes(name)) return;
+    this.mode = "source";
+    if (name === "next") this.selectNext();
+    else this.find.open(name === "goto" ? "line" : "find", name === "replace", cx);
+    cx.notify();
+  }
+
+  // ctrl+d. The editor has one selection, so this moves it to the next match instead of adding one.
+  selectNext() {
+    const next = nextOccurrence(this.code.value(), this.code.selected_range());
+    if (next) this.code.set_selected_range(next);
+  }
+
+  // A text result of the search: select the match on its line, else go to the line.
+  reveal(cx) {
+    if (!this.code || this.tab !== activeTab()) return;
+    const asked = takeReveal(this.file?.path);
+    if (!asked) return;
+    const text = this.code.value();
+    const start = offsetOf(text, asked.line);
+    const end = offsetOf(text, asked.line, Infinity);
+    const at = asked.query ? text.slice(start, end).toLowerCase().indexOf(asked.query.toLowerCase()) : -1;
+    this.mode = "source";
+    this.code.set_selected_range(at === -1 ? { start, end: start } : { start: start + at, end: start + at + asked.query.length });
+    this.code.focus();
+    cx.notify();
   }
 
   // The image and PDF viewer's focus, scroll and inputs live as long as the tab: each file
@@ -157,6 +223,7 @@ export class FileTab {
     this.notice = null;
     this.conflict = false;
     this.mode = "preview";
+    this.find.mode = null;
     const kind = viewerOf(file.path);
     if (kind) {
       this.binary = new Binary(file, kind, this.ui);
@@ -185,7 +252,10 @@ export class FileTab {
     this.eol = text.includes("\r\n") ? "\r\n" : "\n";
     this.saved = text;
     this.editable = writable(this.file?.on) && text.length <= EDITABLE;
+    const indent = indentOf(text);
+    this.wrap = false;
     this.code = EditorState.new({
+      ...(indent && { tab_size: indent.size, hard_tabs: indent.tabs }),
       language: languageOf(this.name),
       value: this.editable ? text : text.slice(0, EDITABLE),
       readonly: !this.editable,
@@ -200,6 +270,7 @@ export class FileTab {
   // An edited tab is kept, as in VS Code: the next click opens another tab.
   changed(cx) {
     this.notice = null;
+    this.find.search(false, cx);
     if (this.dirty && entries()[this.tab]?.preview) setEntry(this.tab, { preview: false });
     this.updateTitle();
     cx.notify();
@@ -472,17 +543,20 @@ export class FileTab {
     cx.notify();
   }
 
-  editor() {
+  editor(t) {
     return v_flex()
       .id("kz-editor")
+      .relative()
       .flex_1()
       .min_h(0)
       .on_key_down((event, cx) => {
+        if (event.key === "escape" && this.find.mode) return this.find.close(cx);
         if (event.keystroke !== "cmd-s") return;
         cx.stop_propagation();
         this.save(cx);
       })
-      .child(Editor.new(this.code).flex_1().min_h(0));
+      .child(Editor.new(this.code).flex_1().min_h(0))
+      .when(Boolean(this.find.mode), (el) => el.child(this.find.view(t, this.width)));
   }
 
   render(cx) {
@@ -492,6 +566,8 @@ export class FileTab {
     const message = (text) => div().p(16).text_color(t.dim).child(text);
     const root = v_flex()
       .id("kz-file")
+      .on_action("kz_find", (_e, cx) => this.command("find", cx))
+      .on_action("kz_replace", (_e, cx) => this.command("replace", cx))
       .size_full()
       .min_h(0)
       .min_w(0)
@@ -523,6 +599,6 @@ export class FileTab {
     if (!this.code) return root.child(message("Loading…"));
     if (this.isMarkdown && this.mode === "preview") return root.child(this.preview(t, cx));
     if (this.isSvg && this.mode === "preview") return root.child(this.svgPreview(t, cx));
-    return root.child(this.editor());
+    return root.child(this.editor(t));
   }
 }

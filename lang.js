@@ -1,6 +1,7 @@
 // Which of the Herdr editor grammars colors a file, or a Markdown code block.
 
 // Grammars this Herdr build has. Others borrow the closest one: php reads well as javascript.
+// The Markdown preview's own tokenizer knows only these, so code fences use them.
 const GRAMMARS = new Set(["javascript", "json", "python", "rust", "go", "yaml", "bash", "sql", "ruby", "java", "c", "cpp", "lua", "html", "css", "markdown"]);
 const ALIASES = {
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "javascript", ts: "javascript", tsx: "javascript",
@@ -9,6 +10,15 @@ const ALIASES = {
   md: "markdown", py: "python", rs: "rust", golang: "go", yml: "yaml", toml: "yaml", sh: "bash", zsh: "bash",
   shell: "bash", console: "bash", shellscript: "bash", ps1: "bash", powershell: "bash", rb: "ruby", kt: "java",
   kotlin: "java", cs: "java", csharp: "java", scala: "java", h: "c", cc: "cpp", cxx: "cpp", hpp: "cpp", "c++": "cpp",
+};
+
+// More grammars the editor has since Herdr 0.1.18, by file extension. Herdr has no TypeScript
+// grammar, and the javascript one stops coloring after the first type annotation. The C# one
+// reads TypeScript line by line, so it keeps its colors.
+const EDITOR = {
+  ts: "cs", tsx: "cs", mts: "cs", cts: "cs", php: "php", cs: "cs", scala: "scala", sc: "scala", r: "r", pl: "perl",
+  pm: "perl", hs: "haskell", erb: "erb", groovy: "groovy", gradle: "groovy", ml: "ocaml", mli: "ocaml", clj: "clojure",
+  cljs: "clojure", edn: "clojure", lisp: "lisp", el: "lisp", d: "d", erl: "erlang", dot: "dot", pas: "pascal", mk: "make",
 };
 
 export const extOf = (name) => (name.includes(".") ? name.split(".").pop().toLowerCase() : "");
@@ -24,5 +34,7 @@ export function languageOf(name) {
   const lower = name.toLowerCase();
   if (lower.endsWith(".blade.php")) return "html";
   if (lower === "dockerfile" || lower.startsWith(".env")) return "bash";
-  return grammarOf(extOf(lower));
+  if (lower === "makefile" || lower === "gnumakefile") return "make";
+  if (lower === "gemfile" || lower === "rakefile") return "ruby";
+  return EDITOR[extOf(lower)] ?? grammarOf(extOf(lower));
 }

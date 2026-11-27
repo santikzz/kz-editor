@@ -20,7 +20,8 @@ Read these files first:
 | `main.js` | Picks the part by `props.role`: tree (default), `file`, `menu`, `ask`. An overlay without a role is the search |
 | `tree.js` | Side panel tree, git marks, `location()` (the folder to show) |
 | `tabs.js` | Shared registry that links each tab to its file, `openFile()` |
-| `file.js` | Editor tab: load, save, disk follow, conflicts |
+| `file.js` | Editor tab: load, save, disk follow, conflicts, key commands |
+| `findcard.js` | Find in file, replace and go to line: a card over the editor |
 | `binary.js`, `markdown.js` | Image, PDF and Markdown views |
 | `menu.js`, `ops.js` | Tree right-click menu, dialogs, file operations |
 | `search.js` | Ctrl+E search popup |
@@ -34,10 +35,10 @@ Do not edit `gpui-kit.d.ts` or `jsconfig.json`. Herdr writes them.
 ## How to work here
 
 - For UI work, load the `/impeccable` and `/unslop` skills first. The search, menus and dialogs are an Operate surface: quiet chrome, keyboard first, scannable.
-- Use only `theme()` colors. Fixed hex colors are allowed only where a file says why (the GitHub colors in `markdown.js`, the PDF match fills).
+- Use only `theme()` colors. Fixed hex colors are allowed only where a file says why (the GitHub colors in `markdown.js`, the VS Code syntax colors in `file.js`, the PDF match fills).
 - No translucent backgrounds. Spacing on a 4 px grid. Sentence case. Lucide icons in `icons/`, never emoji or Unicode glyphs as icons. Show shortcuts as keycaps.
 - Keep the code small and readable. Reuse what the mod already has (`ui.js` buttons, `icons.js`, `tabs.js`) before you write new code. Add no dependencies.
-- Keys live only in `~/.config/herdr-app/keys.json`. A mod cannot bind keys itself. The mod commands are `mod.open:kz-editor` (search) and `kz-editor.save` (save). Do not take a plain Ctrl+letter from the shell unless the user asks.
+- Keys live only in `~/.config/herdr-app/keys.json`. A mod cannot bind keys itself. The mod commands are `mod.open:kz-editor` (search) and `kz-editor.save`, `.find`, `.replace`, `.goto`, `.next` and `.wrap` (the `mod:kz-editor` section, so terminals keep their keys). Do not take a plain Ctrl+letter from the shell unless the user asks.
 - Settings go in `config.json` in the mod folder. Check the types. A missing file or a bad one must fall back to the defaults and show the error.
 - Write all docs in ASD-STE100 Simplified Technical English.
 
@@ -56,8 +57,9 @@ Do not edit `gpui-kit.d.ts` or `jsconfig.json`. Herdr writes them.
 
 Do not investigate these again:
 
-- `EditorState` has only `value`, `set_value`, `on` and `release`. It cannot move the cursor, select or scroll to a line. The `__input_*` host calls do not take its handle.
-- The editor has no find panel: ctrl+f does nothing. Undo is ctrl+z and redo is ctrl+y. A mod cannot call these native actions: `window.dispatch_action` goes to Herdr's commands.
+- `EditorState` has one selection: `selected_range`, `set_selected_range` (it scrolls to the selection) and `replace` (one undo step). No multiple cursors and no match highlights. `findcard.js` builds find, replace and go to line on these.
+- Herdr has no TypeScript grammar. `lang.js` sends `.ts` to `cs`, because the javascript grammar breaks after the first type. RECIPE.md "Watch out" lists the grammar names that work.
+- The editor has no find panel of its own. Undo is ctrl+z and redo is ctrl+y. A mod cannot call these native actions: `window.dispatch_action` goes to Herdr's commands.
 - `rg` is not on the PATH that `exec` uses. Use `git ls-files` and `git grep`.
 - A scroll area in a popup that fits its content gets no height. Give it a height from its rows.
 - `.child()` takes one element. An array goes to `.children()`.

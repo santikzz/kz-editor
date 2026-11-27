@@ -97,12 +97,137 @@ const LEAD = 40;
 const BEFORE = 16;
 const AFTER = 160;
 
-// A line cut down to the part around the match, without its indent.
-export function snippet(text, query) {
-  const line = text.replace(/^\s+/, "");
-  const at = line.toLowerCase().indexOf(query.toLowerCase());
-  if (at === -1) return { before: line.slice(0, AFTER), match: "", after: "" };
+// A line cut down to the part around the match at [start, end), without its indent.
+export function excerpt(text, start, end) {
+  const indent = text.length - text.trimStart().length;
+  const line = text.slice(indent);
+  const at = Math.max(0, start - indent);
+  const stop = Math.max(at, end - indent);
   const from = at > LEAD ? at - BEFORE : 0;
-  const end = at + query.length;
-  return { before: (from ? "…" : "") + line.slice(from, at), match: line.slice(at, end), after: line.slice(end, end + AFTER) };
+  return { before: (from ? "…" : "") + line.slice(from, at), match: line.slice(at, stop), after: line.slice(stop, stop + AFTER) };
+}
+
+export function snippet(text, query) {
+  const at = text.toLowerCase().indexOf(query.toLowerCase());
+  if (at === -1) return { before: text.trimStart().slice(0, AFTER), match: "", after: "" };
+  return excerpt(text, at, at + query.length);
+}
+
+// The line of each of the first `limit` matches: its number from 1 and the excerpt around the
+// match. A match over more than one line shows its first line.
+export function matchLines(text, matches, limit) {
+  const out = [];
+  let line = 1;
+  let lineStart = 0;
+  for (const m of matches.slice(0, limit)) {
+    for (let nl = text.indexOf("\n", lineStart); nl !== -1 && nl < m.start; nl = text.indexOf("\n", lineStart)) {
+      line++;
+      lineStart = nl + 1;
+    }
+    const nl = text.indexOf("\n", lineStart);
+    const lineText = text.slice(lineStart, nl === -1 ? text.length : nl).replace(/\r$/, "");
+    out.push({ line, ...excerpt(lineText, m.start - lineStart, m.end - lineStart) });
+  }
+  return out;
+}
+
+// Find and replace in a file tab, as UTF-16 offsets: the editor selection takes the same.
+const MAX_MATCHES = 10000;
+
+function patternOf(query, { matchCase = false, regex = false } = {}, global = true) {
+  const source = regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(source, `${global ? "g" : ""}${matchCase ? "" : "i"}m`);
+}
+
+// error: the pattern does not compile. capped: more than MAX_MATCHES, the rest are not listed.
+export function findIn(text, query, options) {
+  const found = { matches: [], error: null, capped: false };
+  if (!query) return found;
+  let re;
+  try {
+    re = patternOf(query, options);
+  } catch {
+    return { ...found, error: "Invalid pattern" };
+  }
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (!m[0]) {
+      re.lastIndex++;
+      continue;
+    }
+    if (found.matches.length === MAX_MATCHES) return { ...found, capped: true };
+    found.matches.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return found;
+}
+
+// A regex replacement can use $1 and $&. A literal one is taken as it is.
+// ponytail: one match is replaced without its surroundings, so a lookbehind or ^ in the pattern can miss
+export function replaceOne(matched, query, replacement, options) {
+  if (!options?.regex) return replacement;
+  return matched.replace(patternOf(query, options, false), replacement);
+}
+
+export function replaceAll(text, query, replacement, options) {
+  return text.replace(patternOf(query, options), options?.regex ? replacement : () => replacement);
+}
+
+const isWord = (c) => c !== undefined && /[\w$]/.test(c);
+
+export function wordAt(text, at) {
+  let start = at;
+  let end = at;
+  while (isWord(text[start - 1])) start--;
+  while (isWord(text[end])) end++;
+  return { start, end };
+}
+
+// ctrl+d: the word at the cursor, else the next copy of the selection, from the top after the last.
+// A selected word matches whole words only, as in VS Code.
+export function nextOccurrence(text, range) {
+  if (range.start === range.end) {
+    const word = wordAt(text, range.start);
+    return word.start === word.end ? null : word;
+  }
+  const needle = text.slice(range.start, range.end);
+  const whole = [...needle].every(isWord);
+  const find = (from) => {
+    for (let at = text.indexOf(needle, from); at !== -1; at = text.indexOf(needle, at + 1))
+      if (!whole || (!isWord(text[at - 1]) && !isWord(text[at + needle.length]))) return at;
+    return -1;
+  };
+  let at = find(range.end);
+  if (at === -1) at = find(0);
+  return { start: at, end: at + needle.length };
+}
+
+// Line and column count from 1. Past the end goes to the last line, or to the end of the line.
+export function offsetOf(text, line, column = 1) {
+  let at = 0;
+  for (let i = 1; i < line; i++) {
+    const next = text.indexOf("\n", at);
+    if (next === -1) break;
+    at = next + 1;
+  }
+  const end = text.indexOf("\n", at);
+  return at + Math.min(Math.max(column, 1) - 1, (end === -1 ? text.length : end) - at);
+}
+
+export const lineAt = (text, offset) => text.slice(0, offset).split("\n").length;
+
+// The indent of a file: tabs, or 2 or 4 spaces. Null when no line is indented.
+export function indentOf(text) {
+  let tabs = 0;
+  let two = 0;
+  let four = 0;
+  for (const line of text.split("\n", 2000)) {
+    if (line[0] === "\t") tabs++;
+    if (line[0] !== " ") continue;
+    const n = line.length - line.trimStart().length;
+    if (n === line.length) continue;
+    if (n % 4 === 0) four++;
+    else if (n % 2 === 0) two++;
+  }
+  if (tabs > two + four) return { size: 4, tabs: true };
+  if (!two && !four) return null;
+  return { size: two * 4 > four ? 2 : 4, tabs: false };
 }
