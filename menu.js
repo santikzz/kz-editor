@@ -4,7 +4,7 @@
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
 import { closeOverlay, notify, openOverlay, props, readTextFile, run, theme, writeTextFile } from "herdr";
-import { baseName, openFile } from "./tabs.js";
+import { activeSpace, baseName, openFile, setSpaceRoot } from "./tabs.js";
 import { parentOf } from "./markdown.js";
 import * as ops from "./ops.js";
 
@@ -41,6 +41,7 @@ function items(target) {
     !dir && local && p === "windows" && ["Open with…", () => ops.openWith(path)],
     local && [p === "windows" ? "Reveal in File Explorer" : p === "macos" ? "Reveal in Finder" : "Open containing folder", () => ops.reveal(path)],
     ["Open in terminal", () => run("tab.new", { folder: ops.native(folder, on) })],
+    dir && !top && ["Set as space root", () => setSpaceRoot(activeSpace(), ops.native(path, on))],
     "-",
     dir && ["New file…", ask("new-file", target)],
     dir && ["New folder…", ask("new-folder", target)],

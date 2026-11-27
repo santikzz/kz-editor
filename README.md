@@ -6,8 +6,9 @@ Open files from the [Herdr](https://herdr.dev) side panel in their own tabs, nex
 
 ## Features
 
-- File tree for the folder of the focused terminal, with git marks: `M` modified, `U` new, ignored files dimmed
-- Right-click menu: open, reveal in the file manager, open a terminal, new file or folder, cut, copy, paste, copy path, rename, delete to the Recycle Bin or Trash
+- File tree for the root folder of the space, with git marks: `M` modified, `U` new, ignored files dimmed. The root stays the same when a terminal changes folder
+- One root folder per space, as in a VS Code window. The first time kz-editor sees a space, the root is the folder of its first terminal. To change it, right-click a folder and select "Set as space root", or select "Open folder…" in the `+` menu. An unnamed space takes the name of the folder
+- Right-click menu: open, reveal in the file manager, open a terminal, set as space root, new file or folder, cut, copy, paste, copy path, rename, delete to the Recycle Bin or Trash
 - Search with <kbd>Ctrl</kbd> <kbd>E</kbd>: file names, paths and text in files, ranked like VS Code Quick Open
 - One tab for each file. A click opens a preview tab, a double-click or an edit keeps it
 - Editor with VS Code syntax colors (Dark+ or Light+), line numbers, folding, multiple cursors, and undo and redo
@@ -138,7 +139,7 @@ Every 2 seconds, kz-editor reads each open file from disk:
 - The editor has one selection. <kbd>Ctrl</kbd> <kbd>D</kbd> moves it to the next match. It does not add a cursor.
 - The editor cannot mark all matches. The find card lists them instead, the first 200.
 - An untitled tab keeps its text only while it is open. Closing it or restarting Herdr discards the text.
-- Save as writes on this computer only: in the folder of the space's first terminal, or a folder under it. For a space on another machine, in your home folder.
+- Save as writes on this computer only: in the root folder of the space, or a folder under it. For a space on another machine, in your home folder.
 - The search needs `git`. In a very large folder outside git, such as your home folder, listing stops after 10 seconds.
 - Text search starts at 2 characters and shows 5 lines per file, 200 lines in total.
 - Herdr has no TypeScript grammar. TypeScript uses the C# colors, because the JavaScript grammar stops at the first type. Vue and Svelte use the HTML colors, TOML uses YAML. Files without a grammar open without colors. A mod cannot add grammars.

@@ -17,6 +17,19 @@ export const activeSpace = () => spaces().find((s) => s.active) ?? null;
 export const activeTab = () => activeSpace()?.tabs.find((t) => t.active)?.id ?? null;
 export const isFileTab = (tab) => panes().some((p) => p.tab === tab && p.mod === MOD);
 
+// Each space has one root folder, as a VS Code window has: the tree, the search, Changes and
+// new tabs use it, whatever folder a terminal moved to. kz-tabs sets it when it first sees a space.
+const ROOTS = "kz.roots";
+export const spaceRoot = (space) => (space ? (shared(ROOTS) ?? {})[space.id] ?? space.folder : null);
+
+// An unnamed space takes the folder's name, so its name stops following its terminals.
+export function setSpaceRoot(space, folder) {
+  const live = new Set(spaces().map((s) => s.id));
+  const roots = Object.fromEntries(Object.entries(shared(ROOTS) ?? {}).filter(([id]) => live.has(id)));
+  setShared(ROOTS, { ...roots, [space.id]: folder });
+  if (!space.named) run("space.rename", { id: space.id, name: folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() });
+}
+
 // change: fields to merge, or null to forget the tab.
 export function setEntry(tab, change) {
   const next = { ...entries() };

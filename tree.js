@@ -1,10 +1,10 @@
-// The side panel: the focused pane's folder as a tree, with git colors.
+// The side panel: the space's root folder as a tree, with git colors.
 // A click opens the file in a reusable tab, a double-click keeps that tab, a right-click
 // opens the menu (menu.js).
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, focused, panes, theme, watchFolder, window } from "herdr";
-import { activeSpace, activeTab, entries, openFile } from "./tabs.js";
+import { activeSpace, activeTab, entries, openFile, spaceRoot } from "./tabs.js";
 import { iconFor, isLight, loadIcons } from "./icons.js";
 import { openMenu } from "./menu.js";
 import { clipboard, lastChange, nextJob, sameMachine } from "./ops.js";
@@ -22,13 +22,7 @@ const RANK = { M: 1, A: 2, D: 3, U: 4 };
 export const normalize = (path) =>
   path.replace(/^\\\\\?\\/, "").replace(/\\/g, "/").replace(/\/+$/, "").replace(/^([a-z]):/, (_m, d) => `${d.toUpperCase()}:`);
 
-// A space's folder is where it was made. Its first terminal says where it is now.
-function liveFolder(space) {
-  const tabs = new Set(space?.tabs.map((t) => t.id));
-  return panes().find((p) => tabs.has(p.tab) && p.terminal && p.cwd)?.cwd;
-}
-
-// Where the tree should be. A file tab keeps the tree on that file's folder.
+// Where the tree should be: the space's root. A file tab keeps the tree on the root it was opened from.
 export function location() {
   const space = activeSpace();
   const f = focused();
@@ -37,9 +31,8 @@ export function location() {
     const entry = entries()[pane.tab];
     if (entry) return { cwd: entry.root, on: entry.on ?? null };
   }
-  const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : (space?.machine ?? null);
-  const cwd = pane?.cwd || f?.cwd || liveFolder(space) || space?.folder;
-  return { cwd: cwd ? normalize(cwd) : null, on };
+  const cwd = spaceRoot(space);
+  return { cwd: cwd ? normalize(cwd) : null, on: space?.machine ?? null };
 }
 
 async function listFolder(path, on) {
